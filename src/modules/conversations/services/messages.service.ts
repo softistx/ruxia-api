@@ -1,11 +1,12 @@
 import { estimateTokens, type Message } from "@softistx/ai-core";
 import { compact } from "@softistx/ai-memory";
 import { isObjectIdString } from "@softistx/mongo";
-import { ObjectId } from "mongodb";
+import { type ClientSession, ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
-import { invalidInput } from "../../../shared/errors";
+import { exhausted, invalidInput } from "../../../shared/errors";
 import { toConnection } from "../../../shared/pagination";
+import { retryWriteConflicts } from "../../../shared/retry";
 import { invalidCursor, runInProgress } from "../conversations.errors";
 import { compactionBudget, parentIssues } from "../conversations.rules";
 import { contextOf, pageOfPath, toStored } from "../conversations.utils";
@@ -128,41 +129,56 @@ export class MessagesService {
     const userId = new ObjectId();
     const assistantId = new ObjectId();
     const at = this.now();
-    return this.mongo.as(this.actor).transaction(async (tx) => {
-      const taken = await tx.db.conversations.raw.updateOne(
-        { _id: conversation._id, ownerId: this.actor, activeRunId: null },
-        {
-          $set: {
-            activeRunId: String(assistantId),
-            activeLeafId: assistantId,
-            lastMessageAt: at,
-            updatedAt: at,
-          },
-          $inc: { version: 1 },
-        },
-        tx.session === undefined ? {} : { session: tx.session },
-      );
-      if (taken.matchedCount === 0) throw runInProgress();
-      const user = await tx.db.messages.create({
-        _id: userId,
-        ownerId: this.actor,
-        conversationId: conversation._id,
-        parentId,
-        role: "user",
-        parts: [{ type: "text", text }],
-        status: "done",
-      });
-      const assistant = await tx.db.messages.create({
-        _id: assistantId,
-        ownerId: this.actor,
-        conversationId: conversation._id,
-        parentId: userId,
-        role: "assistant",
-        modelId,
-        status: "streaming",
-      });
-      return { user, assistant };
-    });
+    const session = (tx: { session: ClientSession | undefined }) =>
+      tx.session === undefined ? {} : { session: tx.session };
+    return retryWriteConflicts(
+      () =>
+        this.mongo.as(this.actor).transaction(async (tx) => {
+          // Raw: a conditional write (only while no run is active) that the
+          // typed update cannot express; it bypasses the actors stamping, so
+          // `updatedBy` is set by hand.
+          const taken = await tx.db.conversations.raw.updateOne(
+            {
+              _id: conversation._id,
+              ownerId: this.actor,
+              deletedAt: null,
+              activeRunId: null,
+            },
+            {
+              $set: {
+                activeRunId: String(assistantId),
+                activeLeafId: assistantId,
+                lastMessageAt: at,
+                updatedAt: at,
+                updatedBy: this.actor,
+              },
+              $inc: { version: 1 },
+            },
+            session(tx),
+          );
+          if (taken.matchedCount === 0) throw runInProgress();
+          const user = await tx.db.messages.create({
+            _id: userId,
+            ownerId: this.actor,
+            conversationId: conversation._id,
+            parentId,
+            role: "user",
+            parts: [{ type: "text", text }],
+            status: "done",
+          });
+          const assistant = await tx.db.messages.create({
+            _id: assistantId,
+            ownerId: this.actor,
+            conversationId: conversation._id,
+            parentId: userId,
+            role: "assistant",
+            modelId,
+            status: "streaming",
+          });
+          return { user, assistant };
+        }),
+      exhausted,
+    );
   }
 
   // Ends a streaming message, once: false when something else did first. On
@@ -172,23 +188,46 @@ export class MessagesService {
     message: Pick<MessageDocument, "_id" | "conversationId">,
     end: Finish,
   ): Promise<boolean> {
-    return this.mongo.as(this.actor).transaction(async (tx) => {
-      const done = await tx.db.messages.raw.updateOne(
-        { _id: message._id, ownerId: this.actor, status: "streaming" },
-        {
-          $set: { ...end, updatedAt: this.now() },
-          $inc: { version: 1 },
-        },
-        tx.session === undefined ? {} : { session: tx.session },
-      );
-      if (done.matchedCount === 0) return false;
-      await tx.db.conversations.raw.updateOne(
-        { _id: message.conversationId, activeRunId: String(message._id) },
-        { $set: { activeRunId: null } },
-        tx.session === undefined ? {} : { session: tx.session },
-      );
-      return true;
-    });
+    const at = this.now();
+    return retryWriteConflicts(
+      () =>
+        this.mongo.as(this.actor).transaction(async (tx) => {
+          const options =
+            tx.session === undefined ? {} : { session: tx.session };
+          // Raw: a conditional write (only while still streaming) that the
+          // typed update cannot express; it bypasses the actors stamping, so
+          // `updatedBy` is set by hand.
+          const done = await tx.db.messages.raw.updateOne(
+            {
+              _id: message._id,
+              conversationId: message.conversationId,
+              ownerId: this.actor,
+              status: "streaming",
+            },
+            {
+              $set: { ...end, updatedAt: at, updatedBy: this.actor },
+              $inc: { version: 1 },
+            },
+            options,
+          );
+          if (done.matchedCount === 0) return false;
+          // Raw for the same reason: released only while this run holds it.
+          await tx.db.conversations.raw.updateOne(
+            {
+              _id: message.conversationId,
+              ownerId: this.actor,
+              activeRunId: String(message._id),
+            },
+            {
+              $set: { activeRunId: null, updatedAt: at, updatedBy: this.actor },
+              $inc: { version: 1 },
+            },
+            options,
+          );
+          return true;
+        }),
+      exhausted,
+    );
   }
 
   // The context of a model call over `path`: the summary stored on the deepest

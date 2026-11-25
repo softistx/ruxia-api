@@ -79,6 +79,9 @@ export class ConversationsService {
   // said yet) are left out.
   async list(args: Page) {
     const personaId = args.filter?.personaId ?? undefined;
+    if (personaId !== undefined && !isObjectIdString(personaId)) {
+      return toConnection(args.after, { items: [], nextCursor: null }, 0);
+    }
     const filter = {
       ownerId: this.actor,
       activeLeafId: { $ne: null },

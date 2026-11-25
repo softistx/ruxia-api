@@ -92,6 +92,7 @@ export function services(deps: {
       deps.adapters,
       deps.titleModelId,
       (message) => statusWarning("titles", message),
+      deps.now,
     ),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),

@@ -40,6 +40,7 @@ function titles(
     },
     titleModelId,
     (message) => warnings.push(message),
+    () => new Date(5_000),
   );
   return { service, used, warnings, model };
 }
@@ -54,6 +55,8 @@ describe("TitlesService", () => {
     expect(await again.service.name(started, exchange)).toBeNull();
     const read = await appMongo.db.conversations.findById(started._id);
     expect(read?.title).toBe("Tides");
+    expect(read?.version).toBe(started.version + 1);
+    expect(read?.updatedAt).toEqual(new Date(5_000));
   });
 
   test("a failure leaves the title null and logs no content", async () => {

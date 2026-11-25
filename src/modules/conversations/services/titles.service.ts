@@ -1,19 +1,15 @@
-import { generateObject, type Message } from "@softistx/ai-core";
+import { generateObject } from "@softistx/ai-core";
 import { z } from "zod";
 import type { AppMongo } from "../../../config/db";
 import type { ModelAdapters } from "../conversations.adapters";
 import type { ConversationModels } from "../conversations.integrity";
+import { textMessage } from "../conversations.utils";
 import type { ConversationDocument } from "../models";
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(80) });
 
 const instruction =
   "Write a short title (a few words, no quotes) for this conversation, in the language the member writes in.";
-
-const textMessage = (role: Message["role"], text: string): Message => ({
-  role,
-  parts: [{ type: "text", text }],
-});
 
 // Names a conversation after its first exchange, with a cheap model.
 export class TitlesService {
@@ -24,6 +20,7 @@ export class TitlesService {
     // The cheap model; the conversation's own when it is not available.
     private readonly titleModelId: string,
     private readonly warn: (message: string) => void,
+    private readonly now: () => Date,
   ) {}
 
   // The model to title with: the cheap one, else the conversation's own.
@@ -56,9 +53,24 @@ export class TitlesService {
         },
         titleSchema,
       );
+      // Raw: a conditional write (only while untitled) that the typed update
+      // cannot express; it bypasses the actors stamping, so `updatedBy` is the
+      // owner's, set by hand.
       const done = await this.mongo.db.conversations.raw.updateOne(
-        { _id: conversation._id, title: null },
-        { $set: { title: object.title, updatedAt: new Date() } },
+        {
+          _id: conversation._id,
+          ownerId: conversation.ownerId,
+          title: null,
+          deletedAt: null,
+        },
+        {
+          $set: {
+            title: object.title,
+            updatedAt: this.now(),
+            updatedBy: conversation.ownerId,
+          },
+          $inc: { version: 1 },
+        },
       );
       return done.matchedCount === 0 ? null : object.title;
     } catch (error) {

@@ -25,7 +25,7 @@ export function statusOf(
 // Tokens the context may take before it is folded: three quarters of the
 // model's window, less room for the answer and the system prompt.
 export const compactionBudget = (window: number, systemTokens: number) =>
-  Math.floor(window * 0.75) - 4096 - systemTokens;
+  Math.max(0, Math.floor(window * 0.75) - 4096 - systemTokens);
 
 // What a send's parent must be. In an empty conversation there is none; in
 // any other it is a finished assistant message of this same conversation

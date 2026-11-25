@@ -86,6 +86,8 @@ export function createApp(
     adapters?: ModelAdapters;
     // The one clock of the services: the real now by default.
     now?: () => Date;
+    // The cheap model that titles conversations: `TITLE_MODEL_ID` by default.
+    titleModelId?: string;
     // The private bucket of the media routes: `S3_*`'s by default.
     media?: MediaBucket;
     catalogues?: () => boolean;
@@ -97,6 +99,7 @@ export function createApp(
   const media = options.media ?? serverMedia;
   const adapters = options.adapters ?? serverModels;
   const now = options.now ?? (() => new Date());
+  const titleModelId = options.titleModelId ?? env.TITLE_MODEL_ID;
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
   const servicesOf = (
     viewer: Viewer | null,
@@ -111,7 +114,7 @@ export function createApp(
       clientIp: ip,
       statuses,
       adapters,
-      titleModelId: env.TITLE_MODEL_ID,
+      titleModelId,
       now,
     });
   return (

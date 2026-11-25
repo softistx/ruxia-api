@@ -28,6 +28,10 @@ describe("compactionBudget", () => {
     expect(compactionBudget(200_000, 1_000)).toBe(150_000 - 4_096 - 1_000);
   });
 
+  test("never goes below zero", () => {
+    expect(compactionBudget(1_000, 50_000)).toBe(0);
+  });
+
   test("a small window leaves a budget a thread passes", () => {
     expect(compactionBudget(8_192, 500)).toBe(6_144 - 4_096 - 500);
   });

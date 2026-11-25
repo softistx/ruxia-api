@@ -21,6 +21,12 @@ const asParts = (parts: readonly StoredPart[]) => parts as unknown as Part[];
 export const joinedText = (parts: readonly StoredPart[]) =>
   parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 
+// A plain text message of the SDK.
+export const textMessage = (role: Message["role"], text: string): Message => ({
+  role,
+  parts: [{ type: "text", text }],
+});
+
 // The path root -> leaf as the model reads it. A message with no parts (a
 // stopped answer that wrote nothing) is left out: providers refuse it.
 export const toModelMessages = (path: readonly MessageDocument[]): Message[] =>
@@ -103,15 +109,19 @@ export function costFor(
 }
 
 // The path as the memory package reads a thread: 1-based position, the
-// conversation as the thread.
+// conversation as the thread. A message with no parts is left out, as the
+// model's messages leave it out.
 export const toStored = (path: readonly MessageDocument[]): StoredMessage[] =>
-  path.map((message, index) => ({
-    id: String(message._id),
-    threadId: String(message.conversationId),
-    seq: index + 1,
-    message: { role: message.role, parts: asParts(message.parts) },
-    createdAt: message.createdAt.getTime(),
-  }));
+  path
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => message.parts.length > 0)
+    .map(({ message, index }) => ({
+      id: String(message._id),
+      threadId: String(message.conversationId),
+      seq: index + 1,
+      message: { role: message.role, parts: asParts(message.parts) },
+      createdAt: message.createdAt.getTime(),
+    }));
 
 // Where the model's context starts: after the deepest message of the path
 // that carries a summary (that summary covers it and everything before).

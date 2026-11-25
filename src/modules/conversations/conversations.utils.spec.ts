@@ -10,6 +10,7 @@ import {
   partialParts,
   partsOf,
   shownParts,
+  textMessage,
   toModelMessages,
   toStored,
   usageOf,
@@ -192,6 +193,15 @@ describe("the path", () => {
     });
   });
 
+  test("toStored leaves out a message with no parts", () => {
+    const withEmpty = [
+      path[0],
+      message("assistant", []),
+      path[2],
+    ] as MessageDocument[];
+    expect(toStored(withEmpty).map((m) => m.seq)).toEqual([1, 3]);
+  });
+
   test("pages walk the branch and refuse a foreign cursor", () => {
     const first = pageOfPath(path, 2, undefined);
     expect(first?.items).toHaveLength(2);
@@ -207,6 +217,15 @@ describe("the path", () => {
         Buffer.from(`m:${new ObjectId()}`).toString("base64url"),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("textMessage", () => {
+  test("is one text part of the role", () => {
+    expect(textMessage("user", "hi")).toEqual({
+      role: "user",
+      parts: [{ type: "text", text: "hi" }],
+    });
   });
 });
 

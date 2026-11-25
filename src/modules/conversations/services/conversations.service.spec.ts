@@ -175,6 +175,14 @@ describe("ConversationsService: reading", () => {
     expect(filtered.totalCount).toBe(2);
   });
 
+  test("a malformed persona filter gives an empty page", async () => {
+    const ada = await memberOf(kit);
+    const page = await ada.conversations.list({
+      filter: { personaId: "nope" },
+    });
+    expect(page).toMatchObject({ totalCount: 0, edges: [] });
+  });
+
   test("a cursor of another list or another member is invalid", async () => {
     const ada = await memberOf(kit);
     const bea = await memberOf(kit);

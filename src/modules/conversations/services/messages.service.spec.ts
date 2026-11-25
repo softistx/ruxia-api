@@ -124,6 +124,47 @@ describe("MessagesService: the path", () => {
     });
   });
 
+  test("stops at a parent of another conversation or another owner", async () => {
+    const ada = await memberOf(kit);
+    const bea = await memberOf(kit);
+    const id = await started(ada);
+    const other = await started(ada);
+    const conversation = await ada.conversations.find(id);
+    const elsewhere = await written(
+      ada,
+      await ada.conversations.find(other),
+      null,
+      "user",
+      "elsewhere",
+    );
+    const crossed = await written(
+      ada,
+      conversation,
+      elsewhere._id,
+      "user",
+      "x",
+    );
+    expect(
+      (await ada.messages.path(conversation, crossed._id)).map((m) =>
+        String(m._id),
+      ),
+    ).toEqual([String(crossed._id)]);
+    const foreign = await appMongo.db.messages.create({
+      ownerId: bea.id,
+      conversationId: conversation._id,
+      parentId: null,
+      role: "user",
+      parts: [{ type: "text", text: "theirs" }],
+      status: "done",
+    });
+    const above = await written(ada, conversation, foreign._id, "user", "y");
+    expect(
+      (await ada.messages.path(conversation, above._id)).map((m) =>
+        String(m._id),
+      ),
+    ).toEqual([String(above._id)]);
+  });
+
   test("another member's path is empty", async () => {
     const ada = await memberOf(kit);
     const bea = await memberOf(kit);
@@ -218,6 +259,28 @@ describe("MessagesService: an exchange", () => {
       }),
     ).rejects.toMatchObject({
       extensions: { code: "conversations.errors.run-in-progress" },
+    });
+    expect(
+      await appMongo.db.messages.count({ conversationId: conversation._id }),
+    ).toBe(2);
+  });
+
+  test("two concurrent exchanges: one wins, the other is run-in-progress and writes nothing", async () => {
+    const ada = await memberOf(kit);
+    const id = await started(ada);
+    const conversation = await ada.conversations.find(id);
+    const send = (text: string) =>
+      ada.messages.insertExchange({
+        conversation,
+        parentId: null,
+        text,
+        modelId: sonnet,
+      });
+    const results = await Promise.allSettled([send("a"), send("b")]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const lost = results.find((r) => r.status === "rejected");
+    expect(lost).toMatchObject({
+      reason: { extensions: { code: "conversations.errors.run-in-progress" } },
     });
     expect(
       await appMongo.db.messages.count({ conversationId: conversation._id }),
