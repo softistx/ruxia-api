@@ -17,6 +17,11 @@ export class AvatarsService implements AvatarClaims {
     });
   }
 
+  // How many files `ownerId` uploaded (the quota's count).
+  count(ownerId: string) {
+    return this.mongo.db.personaAvatars.count({ ownerId });
+  }
+
   async uploadedBy(viewerId: string, key: string) {
     const claim = await this.mongo.db.personaAvatars.findById(key);
     return claim?.ownerId === viewerId;

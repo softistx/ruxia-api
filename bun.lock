@@ -20,6 +20,7 @@
         "@softistx/graxia": "^0.17.2",
         "@softistx/graxia-graphiql": "^0.4.1",
         "@softistx/i18n": "^3.2.1",
+        "@softistx/image": "^0.6.0",
         "@softistx/janus": "^0.81.0",
         "@softistx/janus-graphql": "^0.38.2",
         "@softistx/janus-mail": "^0.26.25",
@@ -320,6 +321,8 @@
     "@softistx/graxia-graphiql": ["@softistx/graxia-graphiql@0.4.1", "", { "peerDependencies": { "@softistx/graxia": "^0.17.0", "typescript": "^6.0.3 || ^7.0.0" }, "optionalPeers": ["typescript"] }, "sha512-SdO+Ee5XPElg4njwPfbX7A2H+BF6/tiYxYTK3yFKZrChc2YwF67d6SkB7djtPhnifU9AWiIIdUhxZDJu6vv+Bg=="],
 
     "@softistx/i18n": ["@softistx/i18n@3.2.1", "", { "dependencies": { "@formatjs/icu-messageformat-parser": "^3.5.20", "intl-messageformat": "^12.1.2", "lodash": "^4.18.1" }, "peerDependencies": { "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-J953DgsHW/yRPAMB4YnwU4HIVAejdrKnAPwC7BHLHWUAF2b+OARXycSAzfpGVm1ycV00qYxq6O8FFqkNcMbkxg=="],
+
+    "@softistx/image": ["@softistx/image@0.6.1", "", { "peerDependencies": { "@napi-rs/canvas": "^1.1.0", "@softistx/s3": "^0.13.1", "pdfjs-dist": "^6.5.0", "typescript": "^6.0.3 || ^7.0.0" }, "optionalPeers": ["@napi-rs/canvas", "@softistx/s3", "pdfjs-dist"] }, "sha512-FdNKEs6mlSU22b+ux+ImMyYwARZ0norTbY7ttlCN1YjXEENENyXQ+II7+dnuDhmR6XegRTCsNYAI4+z0E3f5DA=="],
 
     "@softistx/janus": ["@softistx/janus@0.81.0", "", { "peerDependencies": { "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-DI1CHIjmRN5rHuvJtlupXMNLLxKVlzLmSYmXjMkC0nua/56xSE020kD6rOdwMESCpjk59weuTtW3e47GUHk/FA=="],
 

@@ -581,7 +581,7 @@ type Mutation {
     input: CreatePersonaInput!
   ): Persona!
   """
-  Deletes the member's own persona: it leaves every list, and the conversations
+  Deletes the member's own persona (and unfeatures it): it leaves every list, and the conversations
   held with it stay readable. Answers its id. 404 `personas.errors.not-found`,
   403 `personas.errors.not-owner` as for an update.
   """
@@ -612,8 +612,8 @@ type Mutation {
   Copies a persona into a new PRIVATE one owned by the signed-in member: the
   member's own, or a TEAM one. The copy of someone else's keeps neither their
   MCP servers nor their projects. 404 `personas.errors.not-found` for a PRIVATE
-  persona of someone else, 409 `personas.errors.model-unavailable` when its
-  model is no longer enabled.
+  persona of someone else. The copy keeps the model even if it was disabled
+  since: the member may change it, and a conversation refuses a disabled one.
   """
   duplicatePersona(
     """The persona's id."""
@@ -919,8 +919,8 @@ ones.
 """
 type Persona {
   """
-  Key of the avatar file (never a URL): the UI shows it at
-  `/media/persona-avatars/<key>`. Null until one is set.
+  Key of the avatar file (never a URL): the UI shows a size of it at
+  `/media/persona-avatars/<key>/256` (or `/64`). Null until one is set.
   """
   avatarKey: String
   """When it was created."""
@@ -939,6 +939,10 @@ type Persona {
   mine: Boolean!
   """Display name."""
   name: String!
+  """
+  Its owner: id and name only, for a persona the viewer may already read.
+  """
+  owner: PersonaOwner!
   """The account id of its owner."""
   ownerId: ID!
   """The system prompt: how it behaves and talks."""
@@ -985,6 +989,16 @@ type PersonaConnection {
 type PersonaEdge {
   """The persona."""
   node: Persona!
+}
+
+"""
+What a persona shows of its owner: the member's id and name, nothing else.
+"""
+type PersonaOwner {
+  """The owner's account id."""
+  id: ID!
+  """The owner's display name."""
+  name: String!
 }
 
 """What a persona may use in a conversation."""

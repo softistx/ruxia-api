@@ -30,7 +30,7 @@ invitation and mails it; `--print-link` prints the link), `db:sync`, `db:migrate
 
 ## Media
 
-Files go through `@softistx/alxia-media` routes beside `/graphql`, over the private `S3_*` bucket (no URL ever leaves the API; the UI builds `/media/<kind>/<key>` on its own origin). One kind: `persona-avatars` (`PUT` and `GET`, no `DELETE`; png, jpeg or webp up to 2 MiB). A `PUT` answers `{ key, contentType, size }`; the key is the uploader's until a persona carries it, then read by the persona's readers. The `media-uploads` limit is 30 an hour per account (burst 10) and fails open. Files are kept: a deleted persona keeps its avatar.
+Files go through `@softistx/alxia-media` routes beside `/graphql`, over the private `S3_*` bucket (no URL ever leaves the API; the UI builds `/media/<kind>/<key>/<size>` on its own origin). One kind: `persona-avatars` (`PUT` and `GET`, no `DELETE`; png, jpeg or webp up to 2 MiB, at least 64 px a side). A `PUT` answers `{ key, contentType, size }`. The upload is re-encoded into PNG squares of 256 and 64 px and never stored, so its EXIF and GPS data are dropped: only `/media/persona-avatars/<key>/256` and `/64` are served (the bare key is 404). The key is the uploader's until a persona carries it, then read by the persona's readers. Limits: `media-uploads` 30 an hour per account (burst 10, fails open) and a quota of 50 files per member (402 `quota_exceeded`). An upload whose key cannot be recorded is removed at once. Files are otherwise kept: a deleted persona keeps its avatar.
 
 ## Headers
 

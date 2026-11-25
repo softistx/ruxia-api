@@ -20,7 +20,11 @@ import {
   notOwner,
   versionConflict,
 } from "../personas.errors";
-import type { AvatarClaims, PersonaModels } from "../personas.integrity";
+import type {
+  AvatarClaims,
+  PersonaModels,
+  PersonaOwner,
+} from "../personas.integrity";
 import { createIssues, updateIssues } from "../personas.rules";
 import {
   catalogueQuery,
@@ -38,6 +42,9 @@ import {
 // version and `updatedAt` alone, so an open edit form is not refused.
 const silent = { audit: false } as const;
 
+// What a featuring write requires of the persona at the moment it writes.
+const stillTeam = { visibility: "team", deletedAt: null } as const;
+
 type Page = {
   first?: number | null | undefined;
   after?: string | null | undefined;
@@ -53,7 +60,14 @@ export class PersonasService {
     private readonly models: PersonaModels,
     private readonly avatars: AvatarClaims,
     private readonly viewer: Viewer | null,
+    // A member's id and name, batched per request (`PersonaOwner`).
+    private readonly owners: (id: string) => Promise<PersonaOwner>,
   ) {}
+
+  // Who owns a persona the viewer already read.
+  ownerOf(ownerId: string) {
+    return this.owners(ownerId);
+  }
 
   // The acting account: reached only past the guards.
   private get actor() {
@@ -159,12 +173,12 @@ export class PersonasService {
     }
   }
 
-  // A PRIVATE copy owned by the viewer, of their own persona or a team one.
+  // A PRIVATE copy owned by the viewer (its model may be disabled since: the
+  // copy is theirs to edit, and a conversation refuses a disabled model), of their own persona or a team one.
   // What belongs to another owner (their MCP servers, their projects) is not
   // copied.
   async duplicate(id: string): Promise<PersonaDocument> {
     const source = await this.find(id);
-    await this.requireModel(source.defaultModelId);
     const own = ownedBy(source, this.actor);
     return this.personas.create({
       ownerId: this.actor,
@@ -183,8 +197,15 @@ export class PersonasService {
   // Soft delete: the document and its avatar file are kept, so the
   // conversations held with it stay readable (`findIncludingDeleted`).
   async remove(id: string): Promise<string> {
-    await this.owned(id);
+    const persona = await this.owned(id);
     try {
+      if (persona.featured) {
+        await this.personas.update(
+          id,
+          { featured: false, featuredRank: null },
+          silent,
+        );
+      }
       await this.personas.delete(id);
     } catch (error) {
       if (error instanceof NotFoundError) throw notFound();
@@ -194,35 +215,34 @@ export class PersonasService {
   }
 
   // Features a TEAM persona last in the order, or unfeatures it. A persona that
-  // is PRIVATE or deleted is `not-found`: an admin never learns it exists.
+  // is PRIVATE or deleted is `not-found`: an admin never learns it exists. The
+  // write itself is conditional on the persona still being live and TEAM, so
+  // an owner who made it PRIVATE since the read is not featured.
   async setFeatured(id: string, featured: boolean) {
     const persona = await this.team(id);
     if (persona.featured === featured) return persona;
-    if (!featured) {
-      return this.personas.update(
-        id,
-        { featured: false, featuredRank: null },
-        silent,
-      );
-    }
     const last = await this.personas.findFirst(
-      { featured: true },
+      { featured: true, visibility: "team" },
       { sort: { featuredRank: -1 } },
     );
-    return this.personas.update(
-      id,
-      { featured: true, featuredRank: (last?.featuredRank ?? -1) + 1 },
-      silent,
+    const change = featured
+      ? { featured: true, featuredRank: (last?.featuredRank ?? -1) + 1 }
+      : { featured: false, featuredRank: null };
+    const done = await this.personas.raw.updateOne(
+      { _id: persona._id, ...stillTeam },
+      { $set: change },
     );
+    if (done.matchedCount === 0) throw notFound();
+    await this.normaliseRanks();
+    return this.team(id);
   }
 
   // `ids` first, then the featured ones it leaves out, in their order. All or
-  // nothing: one id that is not featured, or repeated, refuses the call.
+  // nothing: one id that is not featured, or repeated, refuses the call. The
+  // ranks are written in one bulk write, each conditional on its persona still
+  // being featured, live and TEAM.
   async reorderFeatured(ids: readonly string[]) {
-    const featured = await this.personas.findMany({
-      filter: { featured: true },
-      sort: { featuredRank: 1, _id: 1 },
-    });
+    const featured = await this.featuredTeam();
     const known = new Map(featured.map((p) => [String(p._id), p]));
     const issues: FieldIssue[] = [];
     ids.forEach((id, index) => {
@@ -239,13 +259,38 @@ export class PersonasService {
       ...ids.map((id) => known.get(id)),
       ...featured.filter((p) => !listed.has(String(p._id))),
     ].filter((p) => p !== undefined);
-    return Promise.all(
-      order.map((p, rank) =>
-        p.featuredRank === rank
-          ? p
-          : this.personas.update(p._id, { featuredRank: rank }, silent),
-      ),
+    await this.writeRanks(order);
+    return this.featuredTeam();
+  }
+
+  // The live TEAM personas that are featured, in rank order.
+  private featuredTeam() {
+    return this.personas.findMany({
+      filter: { featured: true, visibility: "team" },
+      sort: { featuredRank: 1, _id: 1 },
+    });
+  }
+
+  // Ranks 0..n-1 in the current order (ties by id), so a duplicate rank left
+  // by two concurrent featurings heals at once.
+  private async normaliseRanks() {
+    await this.writeRanks(await this.featuredTeam());
+  }
+
+  private async writeRanks(order: readonly PersonaDocument[]) {
+    const ops = order.flatMap((p, rank) =>
+      p.featuredRank === rank
+        ? []
+        : [
+            {
+              updateOne: {
+                filter: { _id: p._id, featured: true, ...stillTeam },
+                update: { $set: { featuredRank: rank } },
+              },
+            },
+          ],
     );
+    if (ops.length > 0) await this.personas.raw.bulkWrite(ops);
   }
 
   // The persona the viewer owns; 403 for a team one of someone else.

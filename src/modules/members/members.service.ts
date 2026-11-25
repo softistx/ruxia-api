@@ -60,6 +60,17 @@ export class MembersService {
     return found;
   }
 
+  // The names of these members, in the order asked (an empty name for an id
+  // that names none): what a DataLoader batch returns. No guard here: the
+  // caller shows a name only of an owner it already let the viewer read.
+  async namesOf(ids: readonly string[]) {
+    const found = await this.members.findMany({
+      filter: { _id: { $in: [...ids] } },
+    });
+    const names = new Map(found.map((member) => [member._id, member.name]));
+    return ids.map((id) => ({ id, name: names.get(id) ?? "" }));
+  }
+
   // The member's role: null for an account that holds none.
   roleOf(id: string): Promise<Role | null> {
     return this.auth.roles.roleOf(id);

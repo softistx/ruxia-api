@@ -63,7 +63,7 @@ const CATALOGUE_QUERY = graphql(`
   query Catalogue($filter: PersonaCatalogueFilter, $first: Int) {
     catalogue(filter: $filter, first: $first) {
       totalCount
-      edges { node { id name mine featured featuredRank } }
+      edges { node { id name mine featured featuredRank owner { id name } } }
     }
   }
 `);
@@ -182,6 +182,10 @@ describe("personas over /graphql", () => {
     expect(catalogue.data?.catalogue.edges.map((e) => e.node.name)).toEqual([
       "Teamie",
     ]);
+    expect(catalogue.data?.catalogue.edges[0]?.node.owner).toEqual({
+      id: ada.userId,
+      name: "Ada",
+    });
     const copy = await asBea.query(DUPLICATE_PERSONA_MUTATION, {
       variables: { id },
     });

@@ -4,11 +4,12 @@ import {
   type MediaKey,
   mediaRoutes,
 } from "@softistx/alxia-media";
+import { withImageRendition } from "@softistx/alxia-media/image";
 import type { Viewer } from "../../auth/viewer";
 import { type Throttle, Throttled } from "../../limits/throttle";
 import type { AvatarsService } from "./services/avatars.service";
 
-// The name of the kind: the URL segment (`/media/persona-avatars/<key>`) the UI
+// The name of the kind: the URL segment (`/media/persona-avatars/<key>/256`) the UI
 // builds from a persona's `avatarKey`, and the bucket's folder.
 export const personaAvatarName = "persona-avatars";
 
@@ -18,9 +19,13 @@ export type MediaViewer = { viewer: Viewer | null };
 // The right to read a key (`AvatarsService.mayRead`) and the upload count the
 // kind throttles on: ports the app passes, never defaulted.
 export type PersonaAvatarPorts = {
-  avatars: Pick<AvatarsService, "mayRead">;
+  avatars: Pick<AvatarsService, "mayRead" | "count">;
   throttle: Pick<Throttle, "uploads">;
 };
+
+// How many avatar files a member may have uploaded, kept ones included: files
+// are never deleted by a request, so the quota bounds the storage.
+export const avatarQuota = 50;
 
 // The one kind of file this module serves: a persona's avatar, a small picture
 // the member uploads, then links with `createPersona` / `updatePersona`.
@@ -48,6 +53,16 @@ export function avatarKind(ports: PersonaAvatarPorts) {
         throw error;
       }
     },
+    // A picture is re-encoded into squares of 256 and 64 pixels and the upload
+    // itself is never stored, so its EXIF and GPS data never reach the bucket
+    // (`GET /media/persona-avatars/<key>` is a 404, the sizes are served).
+    keepOriginal: false,
+    ...withImageRendition({ sizes: [256, 64], minSide: 64, enlarge: false }),
+    quota: async ({ viewer }) => {
+      if (viewer === null) return true;
+      if ((await ports.avatars.count(viewer.id)) < avatarQuota) return true;
+      return { code: "quota_exceeded", status: 402 };
+    },
     // The kind is read per key: the browser revalidates, so a lost right is
     // not served from a year-long cache.
     cacheControl: "private, no-cache",
@@ -59,15 +74,22 @@ export function avatarKind(ports: PersonaAvatarPorts) {
 // so a persona write can link the key and nobody else can before it does.
 export function avatarRoutes(
   ports: PersonaAvatarPorts & {
-    avatars: Pick<AvatarsService, "mayRead" | "record">;
+    avatars: Pick<AvatarsService, "mayRead" | "count" | "record">;
   },
   bucket: MediaBucket,
 ) {
   return mediaRoutes([avatarKind(ports)], {
     bucket,
     uploaded: async ({ key, contentType, size }, { viewer }) => {
+      // A throw here makes the routes remove what they just stored, so no
+      // file is left that nobody can claim.
       if (viewer === null) throw new Error("an upload needs a viewer");
-      await ports.avatars.record(viewer.id, key);
+      try {
+        await ports.avatars.record(viewer.id, key);
+      } catch (error) {
+        console.warn("persona avatar not recorded, its file is removed");
+        throw error;
+      }
       return { key, contentType, size };
     },
   });

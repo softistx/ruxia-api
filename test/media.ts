@@ -34,10 +34,10 @@ export function memoryBucket() {
   return { bucket, objects };
 }
 
-// The smallest PNG there is (a 1x1 pixel), whose first bytes are PNG's.
+// A 64x64 PNG (the smallest side the avatar kind takes), whose first bytes are PNG's.
 export const png = Uint8Array.from(
   atob(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAfbLI3wAAAABJRU5ErkJggg==",
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeklEQVR4nO3PUQkAIBTAwBfFaEY1miH8OITBAtxm7fN1wwUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWPHYBds4BLYkT81wAAAAASUVORK5CYII=",
   ),
   (c) => c.charCodeAt(0),
 );

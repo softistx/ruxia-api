@@ -1,3 +1,4 @@
+import DataLoader from "dataloader";
 import type { Auth } from "../auth/auth";
 import type { Viewer } from "../auth/viewer";
 import { appMongo } from "../config/db";
@@ -33,6 +34,10 @@ export function services(deps: {
   statuses: StatusStore;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
+  const members = new MembersService(appMongo, deps.auth, deps.viewer);
+  const owners = new DataLoader((ids: readonly string[]) =>
+    members.namesOf(ids),
+  );
   const modelCatalogue = new ModelsService(appMongo, deps.statuses, (message) =>
     statusWarning("status", message),
   );
@@ -46,7 +51,7 @@ export function services(deps: {
       deps.viewer,
       limit,
     ),
-    members: new MembersService(appMongo, deps.auth, deps.viewer),
+    members,
     invitations: new InvitationsService(
       appMongo,
       deps.auth,
@@ -61,6 +66,7 @@ export function services(deps: {
       modelCatalogue,
       new AvatarsService(appMongo),
       deps.viewer,
+      (id) => owners.load(id),
     ),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),

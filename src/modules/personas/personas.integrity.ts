@@ -12,3 +12,9 @@ export interface AvatarClaims {
   // Whether `viewerId` uploaded `key` (so may link it to a persona).
   uploadedBy(viewerId: string, key: string): Promise<boolean>;
 }
+
+// What a persona shows of its owner: the member's id and name, nothing else.
+export interface PersonaOwner {
+  id: string;
+  name: string;
+}

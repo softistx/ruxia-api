@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { ObjectId } from "mongodb";
 import { authApp, signedInAccount } from "~/auth";
 import { sessionViewer } from "~/execute";
 import { appMongo } from "../../../config/db";
@@ -38,8 +39,40 @@ async function member(
   const viewer = await sessionViewer(kit, account.token);
   return {
     id: account.userId,
-    service: new PersonasService(appMongo, models, avatars, viewer),
+    service: new PersonasService(
+      appMongo,
+      models,
+      avatars,
+      viewer,
+      async (id) => ({
+        id,
+        name: options.name ?? "Ada",
+      }),
+    ),
   };
+}
+
+// A mongo whose `personas.<call>` runs `then` once it has read: the owner's
+// change lands between the admin's read and write.
+function racing(call: "findById" | "findMany", then: () => Promise<unknown>) {
+  const personas = appMongo.db.personas;
+  const wrapped = new Proxy(personas, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== call)
+        return typeof value === "function" ? value.bind(target) : value;
+      return async (...args: unknown[]) => {
+        const read = await (
+          value as (...a: unknown[]) => Promise<unknown>
+        ).apply(target, args);
+        await then();
+        return read;
+      };
+    },
+  });
+  return {
+    as: () => ({ db: { personas: wrapped } }),
+  } as unknown as typeof appMongo;
 }
 
 const refused = (code: string) => ({ extensions: { code } });
@@ -353,6 +386,21 @@ describe("PersonasService: duplicating", () => {
       tools: { memory: true, mcpServerIds: [] },
     });
     expect((await bea.service.list({})).totalCount).toBe(1);
+    // The source goes private and then away: the copy's owner still reads it.
+    await ada.service.update(String(made._id), { visibility: "PRIVATE" });
+    await ada.service.remove(String(made._id));
+    expect(await avatars.mayRead(bea.id, key)).toBe(true);
+  });
+
+  test("duplicating a persona whose model is disabled since succeeds", async () => {
+    const ada = await member();
+    const stale = await appMongo.as(ada.id).db.personas.create({
+      ownerId: ada.id,
+      name: "Old model",
+      defaultModelId: disabled,
+    });
+    const copy = await ada.service.duplicate(String(stale._id));
+    expect(copy.defaultModelId).toBe(disabled);
   });
 
   test("the copy's name stays within 80 characters", async () => {
@@ -486,5 +534,95 @@ describe("PersonasService: the featured catalogue", () => {
     await expect(admin.service.setFeatured(id, false)).rejects.toMatchObject(
       refused("personas.errors.not-found"),
     );
+  });
+
+  test("an owner who goes PRIVATE between the admin's read and write is not featured", async () => {
+    await appMongo.db.personas.raw.deleteMany({});
+    const ada = await member();
+    const admin = await member({ role: "admin" });
+    const id = await team(ada, "Flips");
+    const flip = () =>
+      appMongo.db.personas.raw.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { visibility: "private" } },
+      );
+    const viewer = await sessionViewer(
+      kit,
+      (await signedInAccount(kit, { role: "admin" })).token,
+    );
+    const racy = new PersonasService(
+      racing("findById", flip),
+      models,
+      avatars,
+      viewer,
+      async (i) => ({ id: i, name: "x" }),
+    );
+    await expect(racy.setFeatured(id, true)).rejects.toMatchObject(
+      refused("personas.errors.not-found"),
+    );
+    const stored = await appMongo.db.personas.findById(id);
+    expect(stored).toMatchObject({ featured: false, featuredRank: null });
+    expect(admin).toBeDefined();
+  });
+
+  test("a persona that goes PRIVATE during a reorder is not written nor returned", async () => {
+    await appMongo.db.personas.raw.deleteMany({});
+    const ada = await member();
+    const admin = await member({ role: "admin" });
+    const [a, b] = [await team(ada, "Keep"), await team(ada, "Leave")];
+    await admin.service.setFeatured(a, true);
+    await admin.service.setFeatured(b, true);
+    const flip = () =>
+      appMongo.db.personas.raw.updateOne(
+        { _id: new ObjectId(b) },
+        { $set: { visibility: "private" } },
+      );
+    const viewer = await sessionViewer(
+      kit,
+      (await signedInAccount(kit, { role: "admin" })).token,
+    );
+    const racy = new PersonasService(
+      racing("findMany", flip),
+      models,
+      avatars,
+      viewer,
+      async (i) => ({ id: i, name: "x" }),
+    );
+    const out = await racy.reorderFeatured([b, a]);
+    expect(out.map((p) => p.name)).toEqual(["Keep"]);
+    expect((await appMongo.db.personas.findById(b))?.featuredRank).toBe(1);
+  });
+
+  test("concurrent featurings end with distinct ranks", async () => {
+    await appMongo.db.personas.raw.deleteMany({});
+    const ada = await member();
+    const admin = await member({ role: "admin" });
+    const ids = await Promise.all(
+      ["C1", "C2", "C3", "C4"].map((name) => team(ada, name)),
+    );
+    await Promise.all(ids.map((id) => admin.service.setFeatured(id, true)));
+    const ranks = (
+      await appMongo.db.personas.findMany({ filter: { featured: true } })
+    ).map((p) => p.featuredRank);
+    expect(ranks.sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  test("deleting a featured persona unfeatures it and clears its rank", async () => {
+    await appMongo.db.personas.raw.deleteMany({});
+    const ada = await member();
+    const admin = await member({ role: "admin" });
+    const id = await team(ada, "Retiring");
+    await admin.service.setFeatured(id, true);
+    await ada.service.remove(id);
+    const kept = await ada.service.findIncludingDeleted(id);
+    expect(kept).toMatchObject({ featured: false, featuredRank: null });
+  });
+
+  test("a persona shows its owner's id and name through the port", async () => {
+    const ada = await member({ name: "Alice" });
+    expect(await ada.service.ownerOf(ada.id)).toEqual({
+      id: ada.id,
+      name: "Alice",
+    });
   });
 });

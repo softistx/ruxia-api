@@ -39,6 +39,7 @@
     "@softistx/graxia": "^0.17.2",
     "@softistx/graxia-graphiql": "^0.4.1",
     "@softistx/i18n": "^3.2.1",
+    "@softistx/image": "^0.6.0",
     "@softistx/janus": "^0.81.0",
     "@softistx/janus-graphql": "^0.38.2",
     "@softistx/janus-mail": "^0.26.25",

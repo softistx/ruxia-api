@@ -47,6 +47,7 @@ export const personas: Resolvers = {
   },
   Persona: {
     id: (persona) => String(persona._id),
+    owner: (persona, _, ctx) => ctx.services.personas.ownerOf(persona.ownerId),
     mine: (persona, _, ctx) => persona.ownerId === ctx.viewer?.id,
     visibility: (persona) => shownVisibility(persona.visibility),
   },
