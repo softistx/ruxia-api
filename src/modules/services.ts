@@ -12,6 +12,7 @@ import {
 import { InvitationsService } from "./invitations";
 import { MembersService, memberRenamer } from "./members";
 import { ModelsService, oncePerMinute, type StatusStore } from "./models";
+import { AvatarsService, PersonasService } from "./personas";
 import { loadedCatalogues, TranslationsService } from "./translations";
 
 // One logger for every request: a down status store is said once a minute.
@@ -32,6 +33,9 @@ export function services(deps: {
   statuses: StatusStore;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
+  const modelCatalogue = new ModelsService(appMongo, deps.statuses, (message) =>
+    statusWarning("status", message),
+  );
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
     passkeys: new PasskeysService(deps.auth, deps.request, deps.viewer, limit),
@@ -51,8 +55,12 @@ export function services(deps: {
       () => new Date(),
       memberRenamer(appMongo),
     ),
-    models: new ModelsService(appMongo, deps.statuses, (message) =>
-      statusWarning("status", message),
+    models: modelCatalogue,
+    personas: new PersonasService(
+      appMongo,
+      modelCatalogue,
+      new AvatarsService(appMongo),
+      deps.viewer,
     ),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),

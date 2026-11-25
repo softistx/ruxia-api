@@ -7,4 +7,5 @@
 export { roleLocks } from "../auth/roles.model";
 export { members } from "./members/members.model";
 export { models } from "./models/models.model";
+export { personaAvatars, personas } from "./personas/models";
 export { translations } from "./translations/translations.model";

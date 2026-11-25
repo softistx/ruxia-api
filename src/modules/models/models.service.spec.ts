@@ -155,6 +155,13 @@ describe("ModelsService", () => {
     );
   });
 
+  test("enabled is true for an enabled model, offline or not, false for a disabled or unknown one", async () => {
+    const service = serviceOf(ollamaDown);
+    expect(await service.enabled("spec-svc:mac")).toBe(true);
+    expect(await service.enabled("spec-svc:off")).toBe(false);
+    expect(await service.enabled("nope")).toBe(false);
+  });
+
   test("requireAvailable refuses unknown, disabled and offline models", async () => {
     const service = serviceOf();
     await expect(service.requireAvailable("nope")).rejects.toMatchObject(

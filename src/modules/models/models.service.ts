@@ -69,6 +69,15 @@ export class ModelsService {
     }
   }
 
+  // Whether the catalogue holds the model and an administrator enabled it:
+  // what a persona's default model must be. Availability is not asked, so an
+  // Ollama model that is offline still counts (`requireAvailable` is the
+  // send's check).
+  async enabled(id: string): Promise<boolean> {
+    const model = await this.mongo.db.models.findById(id);
+    return model?.enabled === true;
+  }
+
   // What a send to `id` calls before it reaches the provider: the model, or
   // `not-found`, `disabled` (an admin has not enabled it) and `offline` (an
   // Ollama server that is off or does not have it).

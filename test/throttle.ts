@@ -17,9 +17,12 @@ export function countingThrottle({
   calls: (family: ClientFamily) => number;
   // The addresses `client()` was bound with, in order (undefined: no address).
   ips: (string | undefined)[];
+  // How many uploads were counted, all accounts together.
+  uploadCalls: () => number;
 } {
   const ips: (string | undefined)[] = [];
   const counts = new Map<ClientFamily, number>();
+  let uploads = 0;
   return {
     client: (ip) => {
       ips.push(ip);
@@ -29,6 +32,11 @@ export function countingThrottle({
         if (calls > after) throw new Throttled(family, retryAfter);
       };
     },
+    uploads: () => async () => {
+      uploads += 1;
+      if (uploads > after) throw new Throttled("uploads", retryAfter);
+    },
+    uploadCalls: () => uploads,
     ips,
     calls: (family) => counts.get(family) ?? 0,
   };

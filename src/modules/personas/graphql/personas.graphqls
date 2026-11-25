@@ -1,0 +1,248 @@
+"Who may see a persona."
+enum PersonaVisibility {
+  "Only its owner."
+  PRIVATE
+  "Every member reads and starts it, only the owner edits it; others may duplicate it."
+  TEAM
+}
+
+"What a persona may use in a conversation."
+type PersonaTools {
+  "Whether it may search the web."
+  webSearch: Boolean!
+  "Whether it may produce artifacts."
+  artifacts: Boolean!
+  "Whether it keeps a long-term memory."
+  memory: Boolean!
+  "Ids of the owner's MCP servers it may call (stored as given, not looked up yet)."
+  mcpServerIds: [String!]!
+}
+
+"""
+An AI persona (spec 4.3): the contact a member talks to. A member reads their
+own and the team's; the admin reads the team's only, never a member's PRIVATE
+ones.
+"""
+type Persona {
+  "The persona's id."
+  id: ID!
+  "The account id of its owner."
+  ownerId: ID!
+  "Whether the signed-in member owns it (and so may edit and delete it)."
+  mine: Boolean!
+  "Display name."
+  name: String!
+  """
+  Key of the avatar file (never a URL): the UI shows it at
+  `/media/persona-avatars/<key>`. Null until one is set.
+  """
+  avatarKey: String
+  "One line that says who it is."
+  tagline: String!
+  "The system prompt: how it behaves and talks."
+  personality: String!
+  "The model a new conversation with it starts on."
+  defaultModelId: String!
+  "What it may use."
+  tools: PersonaTools!
+  "Ids of the projects it may read (stored as given, not looked up yet)."
+  projectIds: [String!]!
+  "The voice it speaks with (stored as given, not looked up yet); null for none."
+  voiceId: String
+  "Who may see it."
+  visibility: PersonaVisibility!
+  "Whether an administrator features it in the catalogue (a TEAM persona only)."
+  featured: Boolean!
+  "Its place among the featured, from 0; null while not featured."
+  featuredRank: Int
+  "When it was created."
+  createdAt: DateTime!
+  "When it last changed."
+  updatedAt: DateTime!
+  "Send it back as `version` in an update: a stale one is refused."
+  version: Int!
+}
+
+"One persona of a page."
+type PersonaEdge {
+  "The persona."
+  node: Persona!
+}
+
+"A page of personas."
+type PersonaConnection {
+  "The personas of the page."
+  edges: [PersonaEdge!]!
+  "Where the page stands."
+  pageInfo: PageInfo!
+  "How many personas there are in all."
+  totalCount: Int!
+}
+
+"What `PersonaToolsInput` may change; a field left out is kept."
+input PersonaToolsInput {
+  "Whether it may search the web."
+  webSearch: Boolean
+  "Whether it may produce artifacts."
+  artifacts: Boolean
+  "The MCP servers it may call, replacing the list (at most 20, each up to 64 characters)."
+  mcpServerIds: [String!] @constraint(maxItems: 20, minLength: 1, maxLength: 64)
+  "Whether it keeps a long-term memory."
+  memory: Boolean
+}
+
+"The persona to create. The owner is the signed-in member."
+input CreatePersonaInput {
+  "Display name."
+  name: String! @constraint(minLength: 1, maxLength: 80)
+  "An avatar key the member uploaded to `/media/persona-avatars`."
+  avatarKey: String @constraint(maxLength: 64)
+  "One line that says who it is; empty by default."
+  tagline: String @constraint(maxLength: 160)
+  "The system prompt; empty by default."
+  personality: String @constraint(maxLength: 20000)
+  "The model a new conversation starts on: an enabled model."
+  defaultModelId: String! @constraint(minLength: 1, maxLength: 200)
+  "What it may use; nothing by default."
+  tools: PersonaToolsInput
+  "The projects it may read (at most 50, each up to 64 characters)."
+  projectIds: [String!] @constraint(maxItems: 50, minLength: 1, maxLength: 64)
+  "The voice it speaks with."
+  voiceId: String @constraint(maxLength: 100)
+  "Who may see it; PRIVATE by default."
+  visibility: PersonaVisibility
+}
+
+"""
+The changes to a persona. A field left out stays as it is; `avatarKey` and
+`voiceId` given as null are cleared; any other field given as null is refused
+(`validation.errors.required` in `extensions.fields`).
+"""
+input UpdatePersonaInput {
+  "The version read: another write since is refused (`personas.errors.version-conflict`). Left out, the change applies to the current version."
+  version: Int
+  "Display name."
+  name: String @constraint(minLength: 1, maxLength: 80)
+  "An avatar key the member uploaded to `/media/persona-avatars`; null removes the avatar."
+  avatarKey: String @constraint(maxLength: 64)
+  "One line that says who it is."
+  tagline: String @constraint(maxLength: 160)
+  "The system prompt."
+  personality: String @constraint(maxLength: 20000)
+  "The model a new conversation starts on: an enabled model."
+  defaultModelId: String @constraint(minLength: 1, maxLength: 200)
+  "What it may use; only the fields given change."
+  tools: PersonaToolsInput
+  "The projects it may read, replacing the list (at most 50, each up to 64 characters)."
+  projectIds: [String!] @constraint(maxItems: 50, minLength: 1, maxLength: 64)
+  "The voice it speaks with; null clears it."
+  voiceId: String @constraint(maxLength: 100)
+  "Who may see it; PRIVATE again unfeatures it."
+  visibility: PersonaVisibility
+}
+
+"What the catalogue shows."
+input PersonaCatalogueFilter {
+  "Only the personas whose name or tagline contains this text, ignoring case."
+  search: String @constraint(maxLength: 80)
+  "Only the featured ones, in the administrator's order."
+  featuredOnly: Boolean = false
+}
+
+extend type Query {
+  "The signed-in member's own personas, most recently changed first."
+  personas(
+    "Page size, 1 to 100."
+    first: Int = 20 @constraint(min: 1, max: 100)
+    "The `endCursor` of the page before."
+    after: String @constraint(maxLength: 500)
+  ): PersonaConnection!
+
+  """
+  One persona: the member's own, or a TEAM one. 404 `personas.errors.not-found`
+  for anything else, another member's PRIVATE persona and a deleted one
+  included, for every role.
+  """
+  persona("The persona's id." id: ID! @constraint(maxLength: 64)): Persona!
+
+  """
+  The TEAM personas, by name (the featured ones, in order, with
+  `featuredOnly`). Every role reads the same list: PRIVATE personas never
+  appear. 400 `personas.errors.invalid-cursor` for a cursor of another list.
+  """
+  catalogue(
+    "What to show."
+    filter: PersonaCatalogueFilter
+    "Page size, 1 to 100."
+    first: Int = 20 @constraint(min: 1, max: 100)
+    "The `endCursor` of the page before."
+    after: String @constraint(maxLength: 500)
+  ): PersonaConnection!
+}
+
+extend type Mutation {
+  """
+  Creates a persona owned by the signed-in member. 409
+  `personas.errors.model-unavailable` when `defaultModelId` is not an enabled
+  model; `validation.errors.invalid` on `avatarKey` for a key the member did
+  not upload.
+  """
+  createPersona("The persona." input: CreatePersonaInput!): Persona!
+
+  """
+  Changes the member's own persona. 404 `personas.errors.not-found` for an
+  unknown or PRIVATE one of someone else, 403 `personas.errors.not-owner` for a
+  TEAM one of someone else, 409 `personas.errors.version-conflict` for a stale
+  `version`, 409 `personas.errors.model-unavailable` for a model not enabled.
+  """
+  updatePersona(
+    "The persona's id."
+    id: ID! @constraint(maxLength: 64)
+    "The changes."
+    input: UpdatePersonaInput!
+  ): Persona!
+
+  """
+  Copies a persona into a new PRIVATE one owned by the signed-in member: the
+  member's own, or a TEAM one. The copy of someone else's keeps neither their
+  MCP servers nor their projects. 404 `personas.errors.not-found` for a PRIVATE
+  persona of someone else, 409 `personas.errors.model-unavailable` when its
+  model is no longer enabled.
+  """
+  duplicatePersona(
+    "The persona's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Persona!
+
+  """
+  Deletes the member's own persona: it leaves every list, and the conversations
+  held with it stay readable. Answers its id. 404 `personas.errors.not-found`,
+  403 `personas.errors.not-owner` as for an update.
+  """
+  deletePersona("The persona's id." id: ID! @constraint(maxLength: 64)): ID!
+
+  """
+  Features a TEAM persona in the catalogue, last in the order (or unfeatures
+  it). Administrators only: 403 `auth.errors.forbidden`. 404
+  `personas.errors.not-found` for a persona that is deleted or not TEAM (a
+  PRIVATE one is never revealed).
+  """
+  setPersonaFeatured(
+    "The persona's id."
+    id: ID! @constraint(maxLength: 64)
+    "Whether to feature it."
+    featured: Boolean!
+  ): Persona!
+
+  """
+  Puts the featured personas in this order: `ids` first, then the featured ones
+  it leaves out, in their order. Administrators only: 403
+  `auth.errors.forbidden`. All or nothing: an id that is not featured is
+  `personas.errors.not-found` on `ids.<i>` of one `validation.errors.invalid-input`.
+  Answers the featured personas in their new order.
+  """
+  reorderFeatured(
+    "The featured personas' ids, in the wanted order (at most 100, each once)."
+    ids: [ID!]! @constraint(maxItems: 100, maxLength: 64)
+  ): [Persona!]!
+}

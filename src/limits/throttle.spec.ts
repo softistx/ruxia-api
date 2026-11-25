@@ -38,6 +38,7 @@ function fakeLimits() {
     clientMail: bound("clientMail"),
     clientCredentials: bound("clientCredentials"),
     clientTokens: bound("clientTokens"),
+    mediaUploads: bound("mediaUploads"),
   };
   return { limits, calls, answers, broken };
 }
@@ -118,5 +119,30 @@ describe("the client families", () => {
     await client("tokens");
     expect(logs).toHaveLength(3);
     expect(logs[2]).toBe("rate limit clientTokens unavailable: Error");
+  });
+});
+
+describe("the uploads limit", () => {
+  test("consumes the account's limit within the deadline", async () => {
+    await throttle().uploads("viewer-1")();
+    expect(fake.calls).toEqual([
+      { limit: "mediaUploads", use: "consume", options: deadline },
+    ]);
+  });
+
+  test("refuses past the limit with the wait in seconds", async () => {
+    fake.answers["mediaUploads"] = 1_200;
+    const error = await refusal(throttle().uploads("viewer-1")());
+    expect(error).toBeInstanceOf(Throttled);
+    expect(error).toMatchObject({ limit: "uploads", retryAfter: 2 });
+  });
+
+  test("fails open when the store is down, logged", async () => {
+    fake.broken.set(
+      "mediaUploads",
+      new GuardError("TIMEOUT", "media-uploads", "timed out"),
+    );
+    await throttle().uploads("viewer-1")();
+    expect(logs).toEqual(["rate limit mediaUploads unavailable: TIMEOUT"]);
   });
 });

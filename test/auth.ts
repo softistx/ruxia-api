@@ -1,4 +1,5 @@
 import { graphqlClient } from "@softistx/alxia-graphql/testing";
+import type { MediaBucket } from "@softistx/alxia-media";
 import { fixedClock, scryptHasher } from "@softistx/janus";
 import { simpleWebAuthnVerifier } from "@softistx/janus-passkeys";
 import { createMemoryMailer, type MemoryMailer } from "@softistx/mail";
@@ -13,6 +14,7 @@ import { type Throttle, unthrottled } from "../src/limits/throttle";
 import { memberJoiner } from "../src/modules/members/members.joiner";
 import { noStatuses, type StatusStore } from "../src/modules/models";
 import { background } from "../src/shared/background";
+import { memoryBucket } from "./media";
 
 export const uiOrigin = "https://ui.ruxia.test";
 
@@ -35,12 +37,15 @@ export function authApp(
   {
     startAt = Date.now(),
     statuses,
+    media = memoryBucket().bucket,
   }: {
     // Where the fixed clock starts (the real now by default): a spec about a
     // fixed window starts it inside one, so moving the clock cannot cross it.
     startAt?: number;
     // The Ollama probe's cached answer (none by default: Ollama is offline).
     statuses?: StatusStore;
+    // The bucket of the media routes (a memory one by default).
+    media?: MediaBucket;
   } = {},
 ) {
   const clock = fixedClock(startAt);
@@ -58,7 +63,12 @@ export function authApp(
     passkeys: { verifier: simpleWebAuthnVerifier() },
     onJoined: memberJoiner(appMongo),
   });
-  const app = createApp({ auth, throttle, statuses: statuses ?? noStatuses });
+  const app = createApp({
+    auth,
+    throttle,
+    statuses: statuses ?? noStatuses,
+    media,
+  });
   // A client sending the session `token` as a bearer, and `language` as
   // accept-language (French without one); anonymous without a token. It sends
   // x-ruxia-client, as every client must (src/http/csrf.ts).

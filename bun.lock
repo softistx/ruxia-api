@@ -14,6 +14,7 @@
         "@softistx/alxia-graphql": "^0.20.1",
         "@softistx/alxia-i18n": "^0.7.0",
         "@softistx/alxia-language": "^0.4.0",
+        "@softistx/alxia-media": "^0.12.0",
         "@softistx/graphql-scalars": "^0.8.0",
         "@softistx/graphql-validation": "^0.10.0",
         "@softistx/graxia": "^0.17.2",
@@ -305,6 +306,8 @@
     "@softistx/alxia-i18n": ["@softistx/alxia-i18n@0.7.0", "", { "peerDependencies": { "@softistx/alxia": "^0.28.0", "@softistx/alxia-language": "^0.4.0", "@softistx/i18n": "^3.2.1", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-njWVPZqOHn0bMW+fBdoMCN3Lom5+XM3OH2JnecH6/sClV8BWCBOsEQ5PXmaFYysivxWyR8c5OB9r3DWm2j6hcQ=="],
 
     "@softistx/alxia-language": ["@softistx/alxia-language@0.4.0", "", { "peerDependencies": { "@softistx/alxia": "^0.28.0", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-Lr1zwanDZ6LCqPwnElNBFQEaUiez1k/S2OPlY7971aSQAfwOAVs16Ci6K2QDWbsTSXKFcl9f1vjLMtOHt+1AkQ=="],
+
+    "@softistx/alxia-media": ["@softistx/alxia-media@0.12.0", "", { "peerDependencies": { "@softistx/alxia": "^0.28.0", "@softistx/image": "^0.5.0 || ^0.6.0", "@softistx/s3": "^0.13.1", "typescript": "^6.0.3 || ^7.0.0" }, "optionalPeers": ["@softistx/image"] }, "sha512-dyATDJgJYr6OGMTnN4gYF8lA5OzV43bTOV96pSzHxZgpDx4P8i1LbRJ46VcH93WjjsFnvMfejjnkZosMevQgig=="],
 
     "@softistx/graphql-codegen-zod": ["@softistx/graphql-codegen-zod@0.6.0", "", { "dependencies": { "@softistx/graphql-validation": "^0.10.0", "change-case": "^5.4.4" }, "peerDependencies": { "graphql": "^16.11.0 || ^17.0.0", "typescript": "^6.0.3 || ^7.0.0", "zod": ">=4.6.5 <5" } }, "sha512-QD+SfMr7HpO/72b99aFn8AkBAz2KUa0+nFud9Pp9oSJ/x+DpreVivS/qcpKKYsWbxeXk4wNdAQ39J8gqXJzE7Q=="],
 

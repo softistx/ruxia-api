@@ -4,6 +4,7 @@ import { accounts } from "./accounts/accounts.resolver";
 import { invitations } from "./invitations/invitations.resolver";
 import { members } from "./members/members.resolver";
 import { models } from "./models/models.resolver";
+import { personas } from "./personas/resolvers/personas.resolver";
 import { systemResolvers } from "./system/system.resolver";
 import { translationResolvers } from "./translations/translations.resolver";
 
@@ -16,6 +17,7 @@ export const resolvers = mergeResolvers([
   invitations,
   members,
   models,
+  personas,
   systemResolvers,
   translationResolvers,
 ]) as Resolvers;
