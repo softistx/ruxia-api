@@ -1,0 +1,169 @@
+# ruxia-api, production: mongo (a one-node replica set), redis, minio, the
+# API and its migration one-shot. Run from this folder (deploy.sh does):
+#
+#   cp .env.example .env     # fill every value, mode 600
+#   ./deploy.sh
+#
+# No `ports:` anywhere: the API is reached by ruxia-ui's BFF over the external
+# `proxy` network, with API_PROXY_SECRET. Mongo, Redis and MinIO sit on the
+# stack's own internal network and have no route in. Every service has
+# resource limits and a light healthcheck (every 30 s once up).
+name: ruxia
+
+networks:
+  proxy:
+    external: true
+  data:
+    internal: true
+
+volumes:
+  mongo-data:
+  redis-data:
+  minio-data:
+
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: "3000"
+  MONGO_URI: mongodb://ruxia-mongo:27017/?replicaSet=rs0
+  MONGO_DATABASE: ruxia
+  REDIS_URL: redis://ruxia-redis:6379
+  UI_ORIGIN: ${UI_ORIGIN:?}
+  MAIL_FROM: ${MAIL_FROM:?}
+  SMTP_HOST: ${SMTP_HOST:?}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_TLS_SERVERNAME: ${SMTP_TLS_SERVERNAME:-}
+  API_PROXY_SECRET: ${API_PROXY_SECRET:?}
+  TOTP_KEYS: ${TOTP_KEYS:?}
+  S3_ENDPOINT: http://ruxia-minio:9000
+  S3_REGION: us-east-1
+  S3_BUCKET: ruxia-media
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER:?}
+  S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?}
+
+services:
+  mongo:
+    image: mongo:8
+    container_name: ruxia-mongo
+    restart: unless-stopped
+    init: true
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    networks: [data]
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval
+          "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'ruxia-mongo:27017' }] }) }; quit(db.hello().isWritablePrimary ? 0 : 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: ruxia-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    networks: [data]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  minio:
+    image: minio/minio:latest
+    container_name: ruxia-minio
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    networks: [data]
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  api-migrate:
+    build:
+      context: ..
+      secrets: [npm_read]
+    image: ruxia-api:latest
+    container_name: ruxia-api-migrate
+    restart: "no"
+    command:
+      [
+        "sh",
+        "-c",
+        "bun --no-install dist/scripts/db-sync.js && bun --no-install dist/scripts/db-migrate.js",
+      ]
+    environment: *api-env
+    networks: [data]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  api:
+    image: ruxia-api:latest
+    container_name: ruxia-api
+    restart: unless-stopped
+    environment: *api-env
+    networks: [data, proxy]
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+secrets:
+  npm_read:
+    environment: NPM_SOFTISTX_READ_TOKEN

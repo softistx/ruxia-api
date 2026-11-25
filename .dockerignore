@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.local
+README.md
+**/*.spec.ts
+**/*.documents.ts
+.demo-secrets.json
+.git
+**/.env
+**/.env.*
+!**/.env.example
+# The stack's compose files, scripts and env files: nothing the API image uses
+# (the backup image builds from deploy/backup with its own context).
+deploy/

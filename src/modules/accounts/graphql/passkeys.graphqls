@@ -1,0 +1,85 @@
+"A passkey of the viewer: a credential held by a device or a password manager."
+type Passkey {
+  "The authenticator's credential id (base64url): what `renamePasskey` and `removePasskey` name."
+  id: ID!
+  "The name the viewer gave it, 1 to 100 characters."
+  name: String!
+  "Whether the credential is synced across the viewer's devices."
+  backedUp: Boolean!
+  "When it was registered."
+  createdAt: DateTime!
+  "When it last signed in, or null when it never has."
+  lastUsedAt: DateTime
+}
+
+"""
+What the browser needs to make or use a passkey: `options` goes to
+`navigator.credentials.create` (registration) or `.get` (sign-in), and
+`challenge` is kept for the call that finishes the flow. One challenge is one
+attempt.
+"""
+type PasskeyChallenge {
+  "The JSON for the WebAuthn call of the browser."
+  options: JSONObject!
+  "Keep it for the next call only (never in a URL)."
+  challenge: String!
+  "When the challenge stops working."
+  expiresAt: DateTime!
+}
+
+extend type Viewer {
+  "The viewer's passkeys, oldest first."
+  passkeys: [Passkey!]!
+}
+
+extend type Mutation {
+  """
+  Starts a passkey sign-in: anonymous, counted by the request's address (429
+  `auth.errors.too-many-attempts`). Finish it with `signInWithPasskey`.
+  """
+  passkeySignInOptions: PasskeyChallenge!
+  """
+  Finishes a passkey sign-in with what `navigator.credentials.get` produced. No
+  password and no code: the device's verification is the whole proof. 401
+  `auth.errors.invalid-credentials` for any refusal; 400
+  `auth.errors.invalid-token` for a challenge unknown, spent or lapsed.
+  """
+  signInWithPasskey(
+    "The `challenge` of `passkeySignInOptions`."
+    challenge: String! @constraint(maxLength: 200)
+    "The browser's JSON, as received."
+    response: JSONObject!
+  ): SignInPayload!
+  "Starts the registration of a passkey for the viewer."
+  passkeyRegistrationOptions: PasskeyChallenge!
+  """
+  Finishes it. Needs a session confirmed within 10 minutes (403
+  `auth.errors.step-up-required`). 400 `auth.errors.passkey-invalid` (a response
+  that does not verify, a bad name); 409 `auth.errors.passkey-taken` for a
+  credential already registered and `auth.errors.passkey-limit` past the most an
+  account may hold.
+  """
+  registerPasskey(
+    "The `challenge` of `passkeyRegistrationOptions`."
+    challenge: String! @constraint(maxLength: 200)
+    "What `navigator.credentials.create` produced."
+    response: JSONObject!
+    "The name to give it, 1 to 100 characters."
+    name: String! @constraint(minLength: 1, maxLength: 100)
+  ): Passkey!
+  "Renames one of the viewer's passkeys; false for one that is not theirs."
+  renamePasskey(
+    "The passkey's credential id."
+    id: ID! @constraint(maxLength: 200)
+    "The new name, 1 to 100 characters."
+    name: String! @constraint(minLength: 1, maxLength: 100)
+  ): Boolean!
+  """
+  Removes one of the viewer's passkeys; false for one that is not theirs. Needs
+  a session confirmed within 10 minutes (403 `auth.errors.step-up-required`).
+  """
+  removePasskey(
+    "The passkey's credential id."
+    id: ID! @constraint(maxLength: 200)
+  ): Boolean!
+}

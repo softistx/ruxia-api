@@ -1,0 +1,87 @@
+"A shipped language: the API's error messages exist in each."
+enum Language {
+  "English."
+  EN
+  "French, the default and the fallback of every missing text."
+  FR
+}
+
+"""
+The API's error messages in one language, for a client that words refusals itself.
+A refusal carries `extensions.code` and `extensions.params`; the client finds the
+code in `messages`, and fills the message with the params (ICU: `{name}`,
+`{count, plural, one {…} other {…}}`, `{count, number}`, `{exitDate, date, long}`).
+The params stay raw: dates are `YYYY-MM-DD` strings and counts are numbers, so
+the message types them. Cache a catalogue per language by `version`.
+"""
+type ErrorCatalogue {
+  "The language of `messages`."
+  language: Language!
+  """
+  Changes whenever a text of the language's catalogue, or of French's which
+  fills it, changes (a translation, a package default, a deploy that adds or
+  rewords one), and it is the same after a restart. It may also change for a
+  text that is no error message. Selecting it alone reads no message.
+  """
+  version: String!
+  "Every error code in code order, each in the language or, where it has no text, in French (the fallback)."
+  messages: [ErrorMessage!]!
+}
+
+"One error code with its message text."
+type ErrorMessage {
+  "`<module>.errors.<slug>`: the `extensions.code` the API answers."
+  code: String!
+  "The ICU message, uninterpolated, that `extensions.params` fill (raw: `YYYY-MM-DD` dates, numbers)."
+  message: String!
+  """
+  The arguments the message names, each once per kind, in order of appearance
+  (inside plural and select arms too): what a client has to supply, without
+  parsing the ICU itself.
+  """
+  params: [ErrorParam!]!
+}
+
+"One argument of an error message."
+type ErrorParam {
+  "The name `extensions.params` gives it."
+  name: String!
+  "How the message uses the argument, so a client formats the raw value."
+  kind: ErrorParamKind!
+}
+
+"How a message uses an argument."
+enum ErrorParamKind {
+  "`{name}`: inserted as it is."
+  TEXT
+  "`{count, number}`, or the count of a plural."
+  NUMBER
+  "`{day, date, long}`: a `YYYY-MM-DD` string formatted as a date."
+  DATE
+  "`{count, plural, one {…} other {…}}`: a number."
+  PLURAL
+  "`{role, select, a {…} other {…}}`: one of the arms' keys, as text."
+  SELECT
+}
+
+extend type Query {
+  """
+  Every API error message in a language (the request's language when none is
+  given: `Accept-Language`, then `lang`, then the cookie, else French). Public:
+  sign-in screens need it, so no viewer is asked for. Word
+  a refusal by taking `messages` for its `extensions.code` and filling it with
+  its `extensions.params`.
+  """
+  errorCatalogue(
+    "The catalogue's language; the request's language when omitted."
+    language: Language
+  ): ErrorCatalogue!
+  """
+  The `version` of `errorCatalogue(language)`, a cheap read to revalidate a
+  cached catalogue. Public.
+  """
+  errorCatalogueVersion(
+    "The catalogue's language; the request's language when omitted."
+    language: Language
+  ): String!
+}

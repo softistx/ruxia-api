@@ -1,0 +1,16 @@
+{
+  "auth.errors.client-header-required": "L'en-tête {header} est obligatoire sur chaque requête.",
+  "auth.errors.unavailable": "Le service est momentanément indisponible. Réessayez dans un instant.",
+  "auth.errors.exhausted": "Trop de modifications simultanées : l'opération n'a pas abouti. Réessayez.",
+  "validation.errors.invalid-input": "Certains champs ne sont pas valides.",
+  "validation.errors.required": "Ce champ est obligatoire.",
+  "validation.errors.invalid": "Cette valeur n'est pas valide.",
+  "validation.errors.too-short": "Cette valeur est trop courte : {min, plural, one {# caractère} other {# caractères}} au moins.",
+  "validation.errors.too-long": "Cette valeur est trop longue : {max, plural, one {# caractère} other {# caractères}} au plus.",
+  "validation.errors.out-of-range": "{bound, select, min {Cette valeur est hors des limites : {min} au moins.} max {Cette valeur est hors des limites : {max} au plus.} both {Cette valeur est hors des limites : entre {min} et {max}.} other {Cette valeur est hors des limites.}}",
+  "validation.errors.no-letter-or-digit": "Ce nom doit contenir au moins une lettre ou un chiffre.",
+  "validation.errors.query-too-deep": "Cette requête est imbriquée trop profondément : {max} niveaux de champs au plus sont autorisés.",
+  "validation.errors.query-too-costly": "Cette requête est trop volumineuse : elle est estimée à {cost} enregistrements ({maxCost} au plus). Demandez des pages plus petites.",
+  "validation.errors.query-too-wide": "Cette requête est trop large : elle sélectionne {fields} champs ({maxFields} au plus). Demandez moins de champs.",
+  "validation.errors.introspection-disabled": "L'introspection du schéma est désactivée sur ce serveur."
+}

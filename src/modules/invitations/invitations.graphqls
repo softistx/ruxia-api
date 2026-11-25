@@ -1,0 +1,116 @@
+"Where an invitation stands."
+enum InvitationStatus {
+  "Sent, not yet accepted and not expired."
+  PENDING
+  "Accepted: the invitee has an account."
+  ACCEPTED
+  "Revoked by an administrator."
+  REVOKED
+  "Not accepted within its 7 days."
+  EXPIRED
+}
+
+"An invitation to join, sent by an administrator. There is no public sign-up."
+type Invitation {
+  "The invitation's id."
+  id: ID!
+  "Where the invitation was sent."
+  email: EmailAddress!
+  "The name the invitee started with (the part of the address before the @)."
+  name: String!
+  "The role the invitee gets on accepting."
+  role: Role!
+  "Where the invitation stands."
+  status: InvitationStatus!
+  "When the link stops working."
+  expiresAt: DateTime!
+  "When it was sent."
+  createdAt: DateTime!
+  "The administrator who sent it; null for the first administrator."
+  invitedBy: ID
+}
+
+"One invitation of a page."
+type InvitationEdge {
+  "The invitation."
+  node: Invitation!
+}
+
+"A page of invitations."
+type InvitationConnection {
+  "The invitations of the page."
+  edges: [InvitationEdge!]!
+  "Where the page stands."
+  pageInfo: PageInfo!
+  "How many invitations match in all."
+  totalCount: Int!
+}
+
+"What the page of an invitation link shows before the invitee accepts."
+type InvitationPreview {
+  "The address the invitation was sent to."
+  email: EmailAddress!
+  "The name to start with; the invitee can change it when accepting."
+  name: String!
+  "The role the invitee gets."
+  role: Role!
+  "When the link stops working."
+  expiresAt: DateTime!
+}
+
+extend type Query {
+  "A page of the invitations, newest first. Administrators only: 403 `auth.errors.forbidden`."
+  invitations(
+    "Only the invitations in this state."
+    status: InvitationStatus
+    "How many invitations to return, at most 100."
+    first: Int = 20 @constraint(min: 1, max: 100)
+    "The cursor of the previous page's end."
+    after: String @constraint(maxLength: 500)
+  ): InvitationConnection!
+
+  """
+  What an invitation link is for, by its token. Anonymous, counted by the
+  caller's address. 400 `invitations.errors.invalid` for an unknown, spent or
+  expired token.
+  """
+  invitationPreview(
+    "The token of the mailed link."
+    token: String! @constraint(maxLength: 200)
+  ): InvitationPreview!
+}
+
+extend type Mutation {
+  """
+  Invites an address with a role and mails it the link. Administrators only.
+  409 `invitations.errors.already-member` for an address that has an account,
+  `invitations.errors.already-pending` for one already invited (revoke first),
+  `invitations.errors.limit` past 200 pending.
+  """
+  inviteMember(
+    "The address to invite."
+    email: EmailAddress!
+    "The role it gets on accepting."
+    role: Role!
+  ): Invitation!
+
+  "Cancels a pending invitation. Administrators only. 404 `invitations.errors.not-found`, 409 `invitations.errors.not-pending`."
+  revokeInvitation(
+    "The invitation's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Invitation!
+
+  """
+  Accepts an invitation: makes the account with its password and signs the
+  invitee in. Anonymous, counted by the caller's address. 400
+  `invitations.errors.invalid` for an unknown, spent or expired token.
+  """
+  acceptInvitation(
+    "The token of the mailed link."
+    token: String! @constraint(maxLength: 200)
+    "The display name, the invitee's own."
+    name: String! @constraint(maxLength: 200)
+    "The password the account starts with."
+    password: String! @constraint(maxLength: 1024)
+  ): SignInPayload!
+}

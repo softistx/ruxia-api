@@ -1,0 +1,13 @@
+{
+  "auth.errors.unauthenticated": "Sign in to continue.",
+  "auth.errors.forbidden": "You are not allowed to do this.",
+  "auth.errors.invalid-credentials": "Wrong e-mail address or password.",
+  "auth.errors.invalid-token": "This link is not valid or has expired: ask for a new one.",
+  "auth.errors.too-many-attempts": "Too many attempts. Try again in {minutes, plural, one {# minute} other {# minutes}}.",
+  "auth.errors.invalid-code": "This code is not correct.",
+  "auth.errors.second-factor-state": "Two-factor authentication is not in the expected state. Reload the page and try again.",
+  "auth.errors.step-up-required": "This operation needs a recent proof of who you are: confirm it with a code, then try again.",
+  "auth.errors.passkey-invalid": "The passkey was refused. Try again or use another sign-in method.",
+  "auth.errors.passkey-limit": "You have reached the maximum number of passkeys. Remove one to add another.",
+  "auth.errors.passkey-taken": "This passkey is already registered."
+}

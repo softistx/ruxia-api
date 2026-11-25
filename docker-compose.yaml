@@ -1,0 +1,85 @@
+# Development services: a one-node MongoDB replica set (transactions need
+# one), Redis and MinIO. Nothing is secret here: the values are local-only.
+#
+#   bun run services:up      # docker compose up -d --wait
+#   bun run dev:api          # the API on the host, against these services
+#
+# The replica set's member is named localhost:27017, which is what the host
+# reaches: MONGO_URI=mongodb://localhost:27017/?replicaSet=rs0.
+# Every service has CPU and memory limits, and every healthcheck probes every
+# 30 s once up (every 2 s while starting) with a shell tool, never a Bun or
+# mongosh process per check.
+name: ruxia-api
+
+services:
+  mongo:
+    image: mongo:8
+    container_name: ruxia-api-mongo
+    init: true
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval
+          "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] }) }; quit(db.hello().isWritablePrimary ? 0 : 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: ruxia-api-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  minio:
+    image: minio/minio:latest
+    container_name: ruxia-api-minio
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ruxia-dev
+      MINIO_ROOT_PASSWORD: ruxia-dev-secret
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+volumes:
+  mongo-data:
+  minio-data:
