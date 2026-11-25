@@ -29,10 +29,10 @@ side is `ruxia-ui/docs/spec.md`; the slices are the issues listed in the trackin
 
 ## 2. Models
 
-| Provider | Package | Notes |
-| --- | --- | --- |
-| Claude | `@softistx/ai-anthropic` | streaming, thinking, prompt caching, vision; web search via the Anthropic server tool |
-| Ollama on the owner's Mac | `@softistx/ai-ollama` | reached over Tailscale; free (no cost counted); **offline** when the Mac is off |
+| Provider                  | Package                  | Notes                                                                                 |
+| ------------------------- | ------------------------ | ------------------------------------------------------------------------------------- |
+| Claude                    | `@softistx/ai-anthropic` | streaming, thinking, prompt caching, vision; web search via the Anthropic server tool |
+| Ollama on the owner's Mac | `@softistx/ai-ollama`    | reached over Tailscale; free (no cost counted); **offline** when the Mac is off       |
 
 - A **model catalogue** (`models` module) lists the enabled models: id, provider, label,
   capabilities (`tools`, `vision`, `thinking`, `webSearch`), context window, prices per
@@ -45,21 +45,21 @@ side is `ruxia-ui/docs/spec.md`; the slices are the issues listed in the trackin
 
 ## 3. Reuse of the house AI SDK
 
-| Need | Package | Status |
-| --- | --- | --- |
-| agent loop, zod tools, proposed actions (confirmed writes), structured output | `@softistx/ai-core` | shipped |
-| Claude adapter | `@softistx/ai-anthropic` | shipped; server web search tool: **upstream** |
-| Ollama adapter | `@softistx/ai-ollama` | shipped; health and installed models, image parts: **upstream** |
-| conversation store and compaction | `@softistx/ai-memory/mongo` | shipped (threads and messages scoped by owner) |
-| MCP servers' tools as agent tools, confirmation for writes | `@softistx/ai-mcp/client` | shipped |
-| request middleware (abort, language), SSE reply | `@softistx/ai-alxia` | shipped |
-| run spans with `gen_ai.*` attributes | `@softistx/ai-telemetry` | shipped |
-| fake model in specs | `@softistx/ai-testing` | shipped |
-| embeddings for RAG | `@softistx/ai-core` + `@softistx/ai-ollama` | **upstream** (an embeddings port) |
-| web search for Ollama models | — | **upstream** (SearXNG tool) |
-| cost of a usage | `@softistx/ai-anthropic` | **upstream** (price table) |
-| a run that outlives its client, resumable SSE | `@softistx/ai-alxia` | **upstream** |
-| PDF attachments sent whole | `@softistx/ai-core` + `@softistx/ai-anthropic` | **upstream** (softistx/ai#154) |
+| Need                                                                          | Package                                        | Status                                                          |
+| ----------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------- |
+| agent loop, zod tools, proposed actions (confirmed writes), structured output | `@softistx/ai-core`                            | shipped                                                         |
+| Claude adapter                                                                | `@softistx/ai-anthropic`                       | shipped; server web search tool: **upstream**                   |
+| Ollama adapter                                                                | `@softistx/ai-ollama`                          | shipped; health and installed models, image parts: **upstream** |
+| conversation store and compaction                                             | `@softistx/ai-memory/mongo`                    | shipped (threads and messages scoped by owner)                  |
+| MCP servers' tools as agent tools, confirmation for writes                    | `@softistx/ai-mcp/client`                      | shipped                                                         |
+| request middleware (abort, language), SSE reply                               | `@softistx/ai-alxia`                           | shipped                                                         |
+| run spans with `gen_ai.*` attributes                                          | `@softistx/ai-telemetry`                       | shipped                                                         |
+| fake model in specs                                                           | `@softistx/ai-testing`                         | shipped                                                         |
+| embeddings for RAG                                                            | `@softistx/ai-core` + `@softistx/ai-ollama`    | **upstream** (an embeddings port)                               |
+| web search for Ollama models                                                  | —                                              | **upstream** (SearXNG tool)                                     |
+| cost of a usage                                                               | `@softistx/ai-anthropic`                       | **upstream** (price table)                                      |
+| a run that outlives its client, resumable SSE                                 | `@softistx/ai-alxia`                           | **upstream**                                                    |
+| PDF attachments sent whole                                                    | `@softistx/ai-core` + `@softistx/ai-anthropic` | **upstream** (softistx/ai#154)                                  |
 
 No app-side replacement is written for an upstream gap: the slice that needs it waits for
 the release (`Temporary, until` only if the owner asks for a stopgap).

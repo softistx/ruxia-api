@@ -83,7 +83,7 @@ export class PasskeysService {
   // The request's session as janus reads it, for the fresh-session calls.
   private async current() {
     const current = await this.auth.accounts.authenticate(this.request);
-    if (!current || current.via !== "session") throw unauthenticated();
+    if (current?.via !== "session") throw unauthenticated();
     return current;
   }
 }

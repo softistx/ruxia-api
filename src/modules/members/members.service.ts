@@ -125,6 +125,7 @@ export class MembersService {
     const active = await this.members
       .find({ _id: { $in: admins }, disabledAt: null })
       .toArray();
+    if (!active.some((admin) => admin._id === id)) return;
     if (active.every((admin) => admin._id === id)) throw lastAdmin();
   }
 
