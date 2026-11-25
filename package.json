@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "nxgt-graphql-scalars typedefs --out && nxgt-graphql-validation typedefs --out && graphql-codegen --config codegen.ts",
+    "generate": "nxgt-graphql-scalars typedefs --out && nxgt-graphql-validation typedefs --out && bun --bun run graphql-codegen --config codegen.ts",
     "dev": "docker compose up -d --wait && bun run dev:api",
     "dev:api": "NODE_ENV=development bun --watch src/server.ts",
     "services:up": "docker compose up -d --wait",
