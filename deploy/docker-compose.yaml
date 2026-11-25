@@ -27,6 +27,7 @@ x-api-env: &api-env
   MONGO_URI: mongodb://ruxia-mongo:27017/?replicaSet=rs0
   MONGO_DATABASE: ruxia
   REDIS_URL: redis://ruxia-redis:6379
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
   UI_ORIGIN: ${UI_ORIGIN:?}
   MAIL_FROM: ${MAIL_FROM:?}
   SMTP_HOST: ${SMTP_HOST:?}

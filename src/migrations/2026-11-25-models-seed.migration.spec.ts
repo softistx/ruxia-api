@@ -47,6 +47,20 @@ describe(id, () => {
     });
   });
 
+  test("down leaves a seeded model an admin changed", async () => {
+    await migrate(db, [baselineTexts, modelsSeed]);
+    await rows().updateOne(
+      { _id: "claude-opus-5-5" },
+      { $set: { enabled: false }, $inc: { version: 1 } },
+    );
+    await rollback(db, [baselineTexts, modelsSeed], {
+      to: baselineTexts.id,
+    });
+    expect((await rows().find({}).toArray()).map((m) => m._id)).toEqual([
+      "claude-opus-5-5",
+    ]);
+  });
+
   test("down removes the seeded models only", async () => {
     await migrate(db, [baselineTexts, modelsSeed]);
     await rows().insertOne({ _id: "ollama:own" } as never, {

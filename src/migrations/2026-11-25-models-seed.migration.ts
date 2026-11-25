@@ -30,12 +30,13 @@ export const modelsSeed = defineMigration({
       session === undefined ? {} : { session },
     );
   },
-  // Removes what `up` created.
+  // Removes what `up` created and nobody touched: a seeded row an admin
+  // changed (its version moved past 0) is data now and stays.
   async down({ db, session }) {
     await db
       .collection<{ _id: string }>("models")
       .deleteMany(
-        { _id: { $in: models.map((model) => model._id) } },
+        { _id: { $in: models.map((model) => model._id) }, version: 0 },
         session === undefined ? {} : { session },
       );
   },

@@ -11,8 +11,14 @@ import {
 } from "./accounts";
 import { InvitationsService } from "./invitations";
 import { MembersService } from "./members";
-import { ModelsService, type StatusStore } from "./models";
+import { ModelsService, oncePerMinute, type StatusStore } from "./models";
 import { loadedCatalogues, TranslationsService } from "./translations";
+
+// One logger for every request: a down status store is said once a minute.
+const statusWarning = oncePerMinute(
+  (message) => console.warn(message),
+  () => Date.now(),
+);
 
 // What a request builds anew, so none is shared between requests: the
 // services over janus, with the request's own limit (bound to its client
@@ -44,7 +50,9 @@ export function services(deps: {
       limit,
       () => new Date(),
     ),
-    models: new ModelsService(appMongo, deps.statuses),
+    models: new ModelsService(appMongo, deps.statuses, (message) =>
+      statusWarning("status", message),
+    ),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
     ),

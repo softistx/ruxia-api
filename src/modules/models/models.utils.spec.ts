@@ -4,10 +4,12 @@ import type { ModelDocument } from "./models.model";
 import {
   capabilitiesOf,
   discoveredModel,
+  failureCode,
   inCatalogueOrder,
   isAvailable,
   OLLAMA_CONTEXT_WINDOW,
   ollamaId,
+  oncePerMinute,
   priceOf,
   undiscovered,
   viewOf,
@@ -94,6 +96,43 @@ describe("models utils", () => {
     });
     expect(priceOf({ ...claude, providerModel: "claude-unknown" })).toBeNull();
     expect(priceOf({ ...qwen, prices: { input: 1, output: 3 } })).toBeNull();
+  });
+
+  test("a dated snapshot id resolves to its model's price", () => {
+    expect(
+      priceOf({ ...claude, providerModel: "claude-sonnet-5-5-20261101" }),
+    ).toMatchObject({ input: 2, output: 10 });
+  });
+
+  test("an id the table lacks, or an inherited property name, has no price", () => {
+    for (const providerModel of [
+      "claude-unknown-20261101",
+      "constructor",
+      "toString",
+      "__proto__",
+    ]) {
+      expect(priceOf({ ...claude, providerModel })).toBeNull();
+    }
+  });
+
+  test("a failure is logged once a minute per name, by its code", () => {
+    const said: string[] = [];
+    let now = 0;
+    const log = oncePerMinute(
+      (m) => said.push(m),
+      () => now,
+    );
+    log("a", "one");
+    log("a", "two");
+    log("b", "other");
+    now = 60_000;
+    log("a", "three");
+    expect(said).toEqual(["one", "other", "three"]);
+    expect(
+      failureCode(Object.assign(new Error("x"), { code: "TIMEOUT" })),
+    ).toBe("TIMEOUT");
+    expect(failureCode(new TypeError("x"))).toBe("TypeError");
+    expect(failureCode("boom")).toBe("unknown");
   });
 
   test("the view speaks the schema's enums and prices", () => {

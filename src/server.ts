@@ -54,7 +54,7 @@ if (env.OLLAMA_BASE_URL === undefined) {
 } else if (redis === undefined) {
   console.warn("ollama probe off: no REDIS_URL");
 } else {
-  new ModelsProbe({
+  const probe = new ModelsProbe({
     mongo: appMongo,
     status: ollamaStatus,
     statuses: serverStatuses,
@@ -63,7 +63,13 @@ if (env.OLLAMA_BASE_URL === undefined) {
     intervalMs: PROBE_INTERVAL_MS,
     timeoutMs: PROBE_TIMEOUT_MS,
     log: (message) => console.warn(message),
-  }).start();
+  });
+  probe.start();
+  // listen drains and exits on these; the timer is unref'd, stopping it is
+  // for the tidy shutdown.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => probe.stop());
+  }
 }
 
 // In dev, the URL and the route table; in production, the URL alone. On

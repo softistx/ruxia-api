@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { generate } from "@softistx/ai-core";
 import type { OllamaStatus } from "@softistx/ai-ollama";
 import { fakeModel } from "@softistx/ai-testing";
+import { ConflictError } from "@softistx/mongo";
 import { memoryStatuses, ollamaDown, ollamaUp } from "~/statuses";
 import { appMongo } from "../../config/db";
 import { ModelsService } from "./models.service";
@@ -33,7 +34,7 @@ await collection.createMany([
 
 const installed = ollamaUp(["spec-on:1", "spec-off:1"]);
 const serviceOf = (status: OllamaStatus | undefined = installed) =>
-  new ModelsService(appMongo, memoryStatuses(status));
+  new ModelsService(appMongo, memoryStatuses(status), () => {});
 
 describe("ModelsService", () => {
   test("lists the enabled models with their availability, Claude first", async () => {
@@ -77,6 +78,7 @@ describe("ModelsService", () => {
       const list = await new ModelsService(
         appMongo,
         memoryStatuses(status),
+        () => {},
       ).list({ includeDisabled: true });
       const ollamaModels = list.filter((model) => model.provider === "OLLAMA");
       expect(ollamaModels.length).toBeGreaterThan(0);
@@ -91,9 +93,11 @@ describe("ModelsService", () => {
       },
       set: async () => {},
     };
-    const list = await new ModelsService(appMongo, failing).list({
-      includeDisabled: false,
-    });
+    const warnings: string[] = [];
+    const list = await new ModelsService(appMongo, failing, (message) =>
+      warnings.push(message),
+    ).list({ includeDisabled: false });
+    expect(warnings).toEqual(["models status unavailable: Error"]);
     expect(list.some((model) => model.id === "claude-sonnet-5-5")).toBe(true);
     expect(
       list
@@ -113,6 +117,36 @@ describe("ModelsService", () => {
     expect(after.version).toBe(before.version + 1);
     await service.setEnabled("spec-svc:off", false);
     expect((await collection.getById("spec-svc:off")).enabled).toBe(false);
+  });
+
+  test("setEnabled reads again and retries once after a lost race, then rethrows", async () => {
+    const update = (failures: number) => {
+      let calls = 0;
+      const models = {
+        findById: async () => ({ ...ollama("on", false), version: 0 }),
+        update: async (_id: string, patch: { enabled: boolean }) => {
+          calls += 1;
+          if (calls <= failures) throw new ConflictError("raced");
+          return { ...ollama("on", patch.enabled), version: 1 };
+        },
+      };
+      const service = new ModelsService(
+        { db: { models } } as never,
+        memoryStatuses(installed),
+        () => {},
+      );
+      return { service, calls: () => calls };
+    };
+    const once = update(1);
+    expect((await once.service.setEnabled("spec-svc:on", true)).enabled).toBe(
+      true,
+    );
+    expect(once.calls()).toBe(2);
+    const twice = update(2);
+    await expect(
+      twice.service.setEnabled("spec-svc:on", true),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(twice.calls()).toBe(2);
   });
 
   test("setEnabled on an unknown id is not-found", async () => {

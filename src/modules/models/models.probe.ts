@@ -37,6 +37,7 @@ export interface ProbePorts {
 // tests, which call `tick` themselves.
 export class ModelsProbe {
   private stopTicking: (() => void) | undefined;
+  private running = false;
 
   constructor(private readonly ports: ProbePorts) {}
 
@@ -53,12 +54,25 @@ export class ModelsProbe {
     this.stopTicking = undefined;
   }
 
-  // One probe. It never throws: a failure is logged and the next tick retries.
+  // One probe, skipped while the previous one is still in flight. It never
+  // throws: a failure is logged and the next tick retries. A store that
+  // fails does not keep the catalogue from learning the installed models.
   async tick() {
+    if (this.running) return;
+    this.running = true;
     try {
       const status = await this.ask();
-      await this.ports.statuses.set(status);
-      if (status.reachable) await this.discover(status.models);
+      await this.attempt(() => this.ports.statuses.set(status));
+      if (status.reachable)
+        await this.attempt(() => this.discover(status.models));
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async attempt(step: () => Promise<void>) {
+    try {
+      await step();
     } catch (error) {
       this.ports.log(
         `ollama probe failed: ${error instanceof Error ? error.name : "unknown"}`,

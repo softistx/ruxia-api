@@ -1,9 +1,14 @@
-import { NotFoundError } from "@softistx/mongo";
+import { ConflictError, NotFoundError } from "@softistx/mongo";
 import type { AppMongo } from "../../config/db";
 import { disabled, notFound, offline } from "./models.errors";
 import type { ModelDocument } from "./models.model";
 import type { StatusStore } from "./models.status";
-import { inCatalogueOrder, isAvailable, viewOf } from "./models.utils";
+import {
+  failureCode,
+  inCatalogueOrder,
+  isAvailable,
+  viewOf,
+} from "./models.utils";
 
 // The model catalogue, for one request: the resolver ran the guard first
 // (member to list, admin to list the disabled and to enable). Availability is
@@ -12,6 +17,8 @@ export class ModelsService {
   constructor(
     private readonly mongo: Pick<AppMongo, "db">,
     private readonly statuses: StatusStore,
+    // Already throttled (src/modules/services.ts): called on every failure.
+    private readonly warn: (message: string) => void,
   ) {}
 
   // The last probe's answer; a store that fails reads as "no answer", so the
@@ -19,7 +26,8 @@ export class ModelsService {
   private async status() {
     try {
       return await this.statuses.get();
-    } catch {
+    } catch (error) {
+      this.warn(`models status unavailable: ${failureCode(error)}`);
       return undefined;
     }
   }
@@ -35,7 +43,17 @@ export class ModelsService {
   }
 
   // Enables or disables a model; one already in that state is left as it is.
+  // A write that lost a race is read again and retried once.
   async setEnabled(id: string, enabled: boolean) {
+    try {
+      return await this.apply(id, enabled);
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+      return this.apply(id, enabled);
+    }
+  }
+
+  private async apply(id: string, enabled: boolean) {
     const models = this.mongo.db.models;
     const model = await models.findById(id);
     if (!model) throw notFound();

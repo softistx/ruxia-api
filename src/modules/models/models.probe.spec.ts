@@ -92,6 +92,42 @@ describe("ModelsProbe", () => {
     expect(await live()).toEqual([`${prefix}a:1`]);
   });
 
+  test("a tick is skipped while the previous probe is still in flight", async () => {
+    let calls = 0;
+    const { probe } = probeOf(() => {
+      calls += 1;
+      return new Promise(() => {});
+    });
+    void probe.tick();
+    await probe.tick();
+    await probe.tick();
+    expect(calls).toBe(1);
+  });
+
+  test("a store that fails does not keep a new model from being listed", async () => {
+    const logs: string[] = [];
+    const probe = new ModelsProbe({
+      mongo: appMongo,
+      status: async () => ollamaUp(["spec-probe-a:1"]),
+      statuses: {
+        get: async () => undefined,
+        set: async () => {
+          throw new Error("redis down");
+        },
+      },
+      ticker: manualTicker().ticker,
+      baseUrl: "http://mac.test:11434",
+      intervalMs: 30_000,
+      timeoutMs: 2_000,
+      log: (message) => logs.push(message),
+    });
+    await probe.tick();
+    expect(logs).toEqual(["ollama probe failed: Error"]);
+    expect(await live()).toEqual([`${prefix}a:1`]);
+    await probe.tick();
+    expect(logs).toHaveLength(2);
+  });
+
   test("two probes finding the same model at once list it once", async () => {
     const a = probeOf(async () => ollamaUp(["spec-probe-a:1"]));
     const b = probeOf(async () => ollamaUp(["spec-probe-a:1"]));

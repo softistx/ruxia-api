@@ -1,6 +1,7 @@
 import { ANTHROPIC_PRICES } from "@softistx/ai-anthropic";
+import type { ModelPrice } from "@softistx/ai-core";
 import type { OllamaModelInfo, OllamaStatus } from "@softistx/ai-ollama";
-import type { Model } from "../../generated/graphql/resolvers";
+import type { Model } from "@/generated/graphql/resolvers";
 import type {
   ModelCapability,
   ModelDocument,
@@ -72,13 +73,22 @@ export function isAvailable(
   );
 }
 
+const SNAPSHOT = /-\d{8}$/;
+
+// The adapter's price of an id, the way its own `costOf` finds it: an own key
+// (never `constructor`), else the id without a trailing `-YYYYMMDD` snapshot.
+function tablePrice(id: string): ModelPrice | undefined {
+  if (Object.hasOwn(ANTHROPIC_PRICES, id)) return ANTHROPIC_PRICES[id];
+  return SNAPSHOT.test(id) ? tablePrice(id.replace(SNAPSHOT, "")) : undefined;
+}
+
 // What a model charges per million tokens: the document's own, else the
 // adapter's table, else (Ollama, or an id the table lacks) nothing.
 export function priceOf(
   model: Pick<ModelDocument, "provider" | "providerModel" | "prices">,
 ) {
   if (model.provider === "ollama") return null;
-  return model.prices ?? ANTHROPIC_PRICES[model.providerModel] ?? null;
+  return model.prices ?? tablePrice(model.providerModel) ?? null;
 }
 
 const providerNames = {
@@ -104,11 +114,33 @@ export function viewOf(
   };
 }
 
+const modelProviderRank = (model: Pick<ModelDocument, "provider">) =>
+  model.provider === "anthropic" ? 0 : 1;
+
 // Claude first, then each provider's models by name.
 export const inCatalogueOrder = (a: ModelDocument, b: ModelDocument) =>
   modelProviderRank(a) - modelProviderRank(b) ||
   a.label.localeCompare(b.label) ||
   a._id.localeCompare(b._id);
 
-const modelProviderRank = (model: Pick<ModelDocument, "provider">) =>
-  model.provider === "anthropic" ? 0 : 1;
+// A logger that says each distinct `name` at most once a minute: a store that
+// is down fails every request, and the log should not.
+export function oncePerMinute(
+  log: (message: string) => void,
+  now: () => number,
+) {
+  const last = new Map<string, number>();
+  return (name: string, message: string) => {
+    const at = now();
+    const before = last.get(name);
+    if (before !== undefined && at - before < 60_000) return;
+    last.set(name, at);
+    log(message);
+  };
+}
+
+// The code of a store failure, never its message (which may carry a key).
+export const failureCode = (error: unknown) =>
+  error instanceof Error
+    ? (((error as { code?: unknown }).code as string | undefined) ?? error.name)
+    : "unknown";

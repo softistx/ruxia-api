@@ -18,19 +18,16 @@ export interface StatusStore {
 // within 90 s rather than showing a stale "online".
 export const STATUS_TTL_SECONDS = 90;
 
-// The `models` cache of src/limits/caches.ts, as the store needs it.
+// The `models` cache of src/limits/caches.ts, as the store needs it; its
+// lifetime is `STATUS_TTL_SECONDS`, set where the cache is defined.
 export interface StatusCache {
   get(server: "ollama"): Promise<OllamaStatus | undefined>;
-  set(
-    server: "ollama",
-    status: OllamaStatus,
-    options?: { ttl?: number },
-  ): Promise<void>;
+  set(server: "ollama", status: OllamaStatus): Promise<void>;
 }
 
 export const redisStatuses = (cache: StatusCache): StatusStore => ({
   get: () => cache.get("ollama"),
-  set: (status) => cache.set("ollama", status, { ttl: STATUS_TTL_SECONDS }),
+  set: (status) => cache.set("ollama", status),
 });
 
 // Without Redis nothing is remembered: every Ollama model reads unavailable.

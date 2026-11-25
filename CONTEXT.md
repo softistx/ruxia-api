@@ -40,35 +40,35 @@ The links of the mails open the UI at: `/auth/accept-invitation?token=`,
 Every code has French and English texts in a data migration (`src/migrations`); the
 inventory is `src/i18n/codes.ts`.
 
-| Code                                 | Raised when                                                                  |
-| ------------------------------------ | ---------------------------------------------------------------------------- |
-| `auth.errors.client-header-required` | `x-ruxia-client` is missing.                                                 |
-| `auth.errors.unauthenticated`        | No valid session.                                                            |
-| `auth.errors.forbidden`              | The role does not allow the operation.                                       |
-| `auth.errors.second-factor-state`    | The second factor is already (or not) in the asked state.                    |
-| `auth.errors.step-up-required`       | A sensitive operation needs a recent confirmation.                           |
-| `auth.errors.invalid-code`           | A wrong second-factor or recovery code.                                      |
-| `auth.errors.invalid-credentials`    | Wrong e-mail or password.                                                    |
-| `auth.errors.invalid-token`          | An unknown, spent or expired link token.                                     |
-| `auth.errors.too-many-attempts`      | Too many attempts in the window.                                             |
-| `auth.errors.unavailable`            | A dependency (janus store, Redis) is down.                                   |
-| `auth.errors.exhausted`              | The client's address is past its limit.                                      |
-| `auth.errors.passkey-invalid`        | A passkey response that does not verify.                                     |
-| `auth.errors.passkey-limit`          | The account holds its maximum of passkeys.                                   |
-| `auth.errors.passkey-taken`          | The passkey is already registered.                                           |
-| `invitations.errors.not-found`       | An id that names no invitation.                                              |
-| `invitations.errors.not-pending`     | Revoking an invitation that is not pending.                                  |
-| `invitations.errors.invalid`         | An unknown, spent or expired invitation token.                               |
-| `invitations.errors.already-member`  | The address already has an account.                                          |
-| `invitations.errors.already-pending` | The address is already invited (revoke first).                               |
-| `invitations.errors.limit`           | Too many pending invitations.                                                |
-| `invitations.errors.refused`         | janus refused the invitation.                                                |
-| `invitations.errors.invalid-cursor`  | A cursor that does not belong to the list.                                   |
-| `members.errors.not-found`           | An id that names no member.                                                  |
-| `members.errors.last-admin`          | Demoting or disabling the last active administrator.                         |
-| `members.errors.invalid-cursor`      | A cursor that does not belong to the list.                                   |
-| `models.errors.not-found`            | An id that names no model of the catalogue (404).                            |
-| `models.errors.disabled`             | Sending to a model an admin has not enabled (409).                           |
-| `models.errors.offline`              | Sending to an Ollama model whose server is off or lacks it (409).            |
-| `operator.errors.invalid-arguments`  | An operator script run with wrong arguments.                                 |
-| `validation.errors.*`                | An input refused: `invalid-input` and each field's reason; the query limits. |
+| Code                                 | Raised when                                                                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth.errors.client-header-required` | `x-ruxia-client` is missing.                                                                                                                  |
+| `auth.errors.unauthenticated`        | No valid session.                                                                                                                             |
+| `auth.errors.forbidden`              | The role does not allow the operation.                                                                                                        |
+| `auth.errors.second-factor-state`    | The second factor is already (or not) in the asked state.                                                                                     |
+| `auth.errors.step-up-required`       | A sensitive operation needs a recent confirmation.                                                                                            |
+| `auth.errors.invalid-code`           | A wrong second-factor or recovery code.                                                                                                       |
+| `auth.errors.invalid-credentials`    | Wrong e-mail or password.                                                                                                                     |
+| `auth.errors.invalid-token`          | An unknown, spent or expired link token.                                                                                                      |
+| `auth.errors.too-many-attempts`      | Too many attempts in the window.                                                                                                              |
+| `auth.errors.unavailable`            | A dependency (janus store, Redis) is down.                                                                                                    |
+| `auth.errors.exhausted`              | The client's address is past its limit.                                                                                                       |
+| `auth.errors.passkey-invalid`        | A passkey response that does not verify.                                                                                                      |
+| `auth.errors.passkey-limit`          | The account holds its maximum of passkeys.                                                                                                    |
+| `auth.errors.passkey-taken`          | The passkey is already registered.                                                                                                            |
+| `invitations.errors.not-found`       | An id that names no invitation.                                                                                                               |
+| `invitations.errors.not-pending`     | Revoking an invitation that is not pending.                                                                                                   |
+| `invitations.errors.invalid`         | An unknown, spent or expired invitation token.                                                                                                |
+| `invitations.errors.already-member`  | The address already has an account.                                                                                                           |
+| `invitations.errors.already-pending` | The address is already invited (revoke first).                                                                                                |
+| `invitations.errors.limit`           | Too many pending invitations.                                                                                                                 |
+| `invitations.errors.refused`         | janus refused the invitation.                                                                                                                 |
+| `invitations.errors.invalid-cursor`  | A cursor that does not belong to the list.                                                                                                    |
+| `members.errors.not-found`           | An id that names no member.                                                                                                                   |
+| `members.errors.last-admin`          | Demoting or disabling the last active administrator.                                                                                          |
+| `members.errors.invalid-cursor`      | A cursor that does not belong to the list.                                                                                                    |
+| `models.errors.not-found`            | An id that names no model of the catalogue (404).                                                                                             |
+| `models.errors.disabled`             | Sending to a model an admin has not enabled (409).                                                                                            |
+| `models.errors.offline`              | Sending to an Ollama model whose server is off or lacks it (409: a state refusal the UI shows as an offline model, never an outage to retry). |
+| `operator.errors.invalid-arguments`  | An operator script run with wrong arguments.                                                                                                  |
+| `validation.errors.*`                | An input refused: `invalid-input` and each field's reason; the query limits.                                                                  |

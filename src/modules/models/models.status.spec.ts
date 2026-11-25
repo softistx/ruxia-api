@@ -8,7 +8,7 @@ import {
 } from "./models.status";
 
 describe("models status", () => {
-  test("the Redis store keeps the answer 90 seconds under the ollama key", async () => {
+  test("the Redis store keeps the answer under the ollama key, for the cache's 90 seconds", async () => {
     const calls: unknown[][] = [];
     const cache: StatusCache = {
       get: async () => ollamaUp(["a:1"]),
@@ -18,7 +18,7 @@ describe("models status", () => {
     };
     const store = redisStatuses(cache);
     await store.set(ollamaUp(["a:1"]));
-    expect(calls).toEqual([["ollama", ollamaUp(["a:1"]), { ttl: 90 }]]);
+    expect(calls).toEqual([["ollama", ollamaUp(["a:1"])]]);
     expect(STATUS_TTL_SECONDS).toBe(90);
     expect(await store.get()).toEqual(ollamaUp(["a:1"]));
   });
