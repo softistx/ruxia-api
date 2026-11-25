@@ -7,7 +7,11 @@ roadmap [docs/roadmap.md](docs/roadmap.md).
 
 The owner's rules for every repository are in `~/.claude/CLAUDE.md`; this file states
 only what is ruxia-api's own. The stack's conventions are the `alxia-graphql-api` plugin's
-(`build-an-alxia-graphql-api`, `add-a-module`, its `conventions-reviewer`).
+(`build-an-alxia-graphql-api`, `add-a-module`, its `conventions-reviewer`), and they
+apply here **in full**: every rule of those skills counts as stated in this file, so the
+`conventions-reviewer` counts it, except where a line below departs from it (single
+tenant: no `scoped()` tenancy). Background jobs that keep a module's data current while
+the server runs (such as `models.probe.ts`) are the `reload` role under another name.
 
 - **Coordination**: the ruxia session in `~/workspace/dev/ruxia/` coordinates; send it
   status, merges, blockers and owner questions with a recommended option.
