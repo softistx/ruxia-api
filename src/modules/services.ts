@@ -10,6 +10,12 @@ import {
   SignInService,
   StepUpService,
 } from "./accounts";
+import {
+  ConversationsService,
+  MessagesService,
+  type ModelAdapters,
+  TitlesService,
+} from "./conversations";
 import { InvitationsService } from "./invitations";
 import { MembersService, memberRenamer } from "./members";
 import { ModelsService, oncePerMinute, type StatusStore } from "./models";
@@ -32,6 +38,9 @@ export function services(deps: {
   throttle: Throttle;
   clientIp: string | undefined;
   statuses: StatusStore;
+  adapters: ModelAdapters;
+  titleModelId: string;
+  now: () => Date;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
   const members = new MembersService(appMongo, deps.auth, deps.viewer);
@@ -40,6 +49,13 @@ export function services(deps: {
   );
   const modelCatalogue = new ModelsService(appMongo, deps.statuses, (message) =>
     statusWarning("status", message),
+  );
+  const personas = new PersonasService(
+    appMongo,
+    modelCatalogue,
+    new AvatarsService(appMongo),
+    deps.viewer,
+    (id) => owners.load(id),
   );
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
@@ -61,12 +77,21 @@ export function services(deps: {
       memberRenamer(appMongo),
     ),
     models: modelCatalogue,
-    personas: new PersonasService(
+    personas,
+    conversations: new ConversationsService(
       appMongo,
       modelCatalogue,
-      new AvatarsService(appMongo),
+      personas,
       deps.viewer,
-      (id) => owners.load(id),
+      deps.now,
+    ),
+    messages: new MessagesService(appMongo, deps.viewer, deps.now),
+    titles: new TitlesService(
+      appMongo,
+      modelCatalogue,
+      deps.adapters,
+      deps.titleModelId,
+      (message) => statusWarning("titles", message),
     ),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),

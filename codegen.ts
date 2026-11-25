@@ -38,6 +38,8 @@ const config: CodegenConfig = {
           Viewer: "@/auth/viewer#ViewerModel",
           Member: "@/modules/members#MemberDocument",
           Persona: "@/modules/personas/models#PersonaDocument",
+          Conversation: "@/modules/conversations/models#ConversationDocument",
+          Message: "@/modules/conversations/models#MessageDocument",
           Invitation: "@/modules/invitations#InvitationView",
           ErrorCatalogue: "@/modules/translations#CatalogueView",
           ErrorMessage: "@/modules/translations#ErrorMessageView",

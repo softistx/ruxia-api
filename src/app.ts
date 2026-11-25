@@ -9,13 +9,16 @@ import type { Auth } from "./auth/auth";
 import { janusViewer, type Viewer } from "./auth/viewer";
 import { serverAuth } from "./config/auth";
 import { appMongo, closeDatabases } from "./config/db";
+import { env } from "./config/env";
 import { serverMedia } from "./config/media";
+import { serverModels } from "./config/models";
 import { redis, serverStatuses, serverThrottle } from "./config/redis";
 import { type Base, type BaseOptions, createBase } from "./http/context";
 import { clientHeader } from "./http/csrf";
 import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
+import type { ModelAdapters } from "./modules/conversations";
 import type { StatusStore } from "./modules/models";
 import { AvatarsService, avatarRoutes } from "./modules/personas";
 import { type Services, services } from "./modules/services";
@@ -79,6 +82,10 @@ export function createApp(
     auth?: Auth;
     throttle?: Throttle;
     statuses?: StatusStore;
+    // The provider adapters conversations call: `serverModels` by default.
+    adapters?: ModelAdapters;
+    // The one clock of the services: the real now by default.
+    now?: () => Date;
     // The private bucket of the media routes: `S3_*`'s by default.
     media?: MediaBucket;
     catalogues?: () => boolean;
@@ -88,12 +95,25 @@ export function createApp(
   const throttle = options.throttle ?? serverThrottle;
   const statuses = options.statuses ?? serverStatuses;
   const media = options.media ?? serverMedia;
+  const adapters = options.adapters ?? serverModels;
+  const now = options.now ?? (() => new Date());
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
   const servicesOf = (
     viewer: Viewer | null,
     request: Request,
     ip: string | undefined,
-  ) => services({ auth, request, viewer, throttle, clientIp: ip, statuses });
+  ) =>
+    services({
+      auth,
+      request,
+      viewer,
+      throttle,
+      clientIp: ip,
+      statuses,
+      adapters,
+      titleModelId: env.TITLE_MODEL_ID,
+      now,
+    });
   return (
     createBase({
       ...options,

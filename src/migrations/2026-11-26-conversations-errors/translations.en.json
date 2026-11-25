@@ -1,0 +1,10 @@
+{
+  "conversations.errors.not-found": "This conversation does not exist.",
+  "conversations.errors.invalid-cursor": "This page marker does not belong to this list: start again from the first page.",
+  "conversations.errors.invalid-parent": "A reply can only follow a finished answer of this conversation.",
+  "conversations.errors.run-in-progress": "An answer is still being written in this conversation: wait for it or stop it first.",
+  "conversations.errors.run-not-found": "This answer is not running.",
+  "conversations.errors.model-unavailable": "This model is not available: pick a model an administrator has enabled.",
+  "conversations.errors.persona-unavailable": "The persona of this conversation is no longer available: you can read the conversation but not continue it.",
+  "conversations.errors.too-many-messages": "You are sending messages too fast: try again in {minutes, plural, one {# minute} other {# minutes}}."
+}

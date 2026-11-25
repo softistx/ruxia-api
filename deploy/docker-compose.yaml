@@ -28,6 +28,8 @@ x-api-env: &api-env
   MONGO_DATABASE: ruxia
   REDIS_URL: redis://ruxia-redis:6379
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  TITLE_MODEL_ID: ${TITLE_MODEL_ID:-claude-haiku-5-5}
   UI_ORIGIN: ${UI_ORIGIN:?}
   MAIL_FROM: ${MAIL_FROM:?}
   SMTP_HOST: ${SMTP_HOST:?}

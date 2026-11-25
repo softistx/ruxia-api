@@ -16,6 +16,7 @@ export type BoundLimits = {
   clientCredentials: Bound<IpParams>;
   clientTokens: Bound<IpParams>;
   mediaUploads: Bound<ViewerParams>;
+  messageSends: Bound<ViewerParams>;
 };
 
 const seconds = (ms: number) => Math.ceil(ms / 1000);
@@ -120,6 +121,29 @@ function uploadLimit(
   };
 }
 
+// The member's sends: one limit by account, failing open.
+function sendLimit(
+  limits: BoundLimits,
+  call: ReturnType<typeof guards>["call"],
+): Pick<Throttle, "sends"> {
+  return {
+    sends: (viewerId) => async () => {
+      let verdict: Verdict;
+      try {
+        verdict = await call("messageSends", () =>
+          limits.messageSends.consume({ viewerId }, 1, deadline),
+        );
+      } catch (error) {
+        if (error instanceof LimitsUnavailable) return;
+        throw error;
+      }
+      if (!verdict.allowed) {
+        throw new Throttled("sends", seconds(verdict.retryAfter));
+      }
+    },
+  };
+}
+
 // The real Throttle, over the limits `openRedis` wired (`redis.limits`).
 export function redisThrottle(
   redis: { limits: BoundLimits },
@@ -130,5 +154,6 @@ export function redisThrottle(
   return {
     ...clientLimit(limits, call),
     ...uploadLimit(limits, call),
+    ...sendLimit(limits, call),
   };
 }

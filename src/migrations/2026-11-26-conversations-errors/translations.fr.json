@@ -1,0 +1,10 @@
+{
+  "conversations.errors.not-found": "Cette conversation n'existe pas.",
+  "conversations.errors.invalid-cursor": "Ce repère de page n'appartient pas à cette liste : repartez de la première page.",
+  "conversations.errors.invalid-parent": "Une réponse ne peut suivre qu'une réponse terminée de cette conversation.",
+  "conversations.errors.run-in-progress": "Une réponse est encore en cours dans cette conversation : attendez-la ou arrêtez-la d'abord.",
+  "conversations.errors.run-not-found": "Cette réponse n'est pas en cours.",
+  "conversations.errors.model-unavailable": "Ce modèle n'est pas disponible : choisissez un modèle activé par un administrateur.",
+  "conversations.errors.persona-unavailable": "Le persona de cette conversation n'est plus disponible : vous pouvez la lire mais pas la poursuivre.",
+  "conversations.errors.too-many-messages": "Vous envoyez des messages trop vite : réessayez dans {minutes, plural, one {# minute} other {# minutes}}."
+}

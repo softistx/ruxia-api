@@ -1,3 +1,4 @@
+import { codes as conversations } from "../modules/conversations/conversations.errors";
 import { codes as invitations } from "../modules/invitations/invitations.errors";
 import { codes as members } from "../modules/members/members.errors";
 import { codes as models } from "../modules/models/models.errors";
@@ -46,6 +47,7 @@ export const validation = defineCodes("validation", [
 // consistency spec checks against the database's texts (src/i18n/codes.spec.ts).
 export const errorCodes = [
   ...auth,
+  ...conversations,
   ...invitations,
   ...members,
   ...models,
