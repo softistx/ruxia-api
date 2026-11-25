@@ -134,6 +134,28 @@ scalar CIDRv6 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4291")
 """An ISO 3166-1 alpha-2 country code, such as FR."""
 scalar CountryCode @specifiedBy(url: "https://www.iso.org/iso-3166-country-codes.html")
 
+"""The persona to create. The owner is the signed-in member."""
+input CreatePersonaInput {
+  """An avatar key the member uploaded to `/media/persona-avatars`."""
+  avatarKey: String @constraint(maxLength: 64)
+  """The model a new conversation starts on: an enabled model."""
+  defaultModelId: String! @constraint(minLength: 1, maxLength: 200)
+  """Display name."""
+  name: String! @constraint(minLength: 1, maxLength: 80)
+  """The system prompt; empty by default."""
+  personality: String @constraint(maxLength: 20000)
+  """The projects it may read (at most 50, each up to 64 characters)."""
+  projectIds: [String!] @constraint(maxItems: 50, minLength: 1, maxLength: 64)
+  """One line that says who it is; empty by default."""
+  tagline: String @constraint(maxLength: 160)
+  """What it may use; nothing by default."""
+  tools: PersonaToolsInput
+  """Who may see it; PRIVATE by default."""
+  visibility: PersonaVisibility
+  """The voice it speaks with."""
+  voiceId: String @constraint(maxLength: 100)
+}
+
 """
 A cuid2: a lowercase letter, then lowercase letters and digits, 2 to 32 in all.
 """
@@ -549,6 +571,25 @@ type Mutation {
     code: String! @constraint(maxLength: 20)
   ): DateTime!
   """
+  Creates a persona owned by the signed-in member. 409
+  `personas.errors.model-unavailable` when `defaultModelId` is not an enabled
+  model; `validation.errors.invalid` on `avatarKey` for a key the member did
+  not upload.
+  """
+  createPersona(
+    """The persona."""
+    input: CreatePersonaInput!
+  ): Persona!
+  """
+  Deletes the member's own persona (and unfeatures it): it leaves every list, and the conversations
+  held with it stay readable. Answers its id. 404 `personas.errors.not-found`,
+  403 `personas.errors.not-owner` as for an update.
+  """
+  deletePersona(
+    """The persona's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): ID!
+  """
   Disables a member: it is signed out and cannot sign in. The last active
   administrator cannot be disabled: 409 `members.errors.last-admin`.
   Administrators only.
@@ -567,6 +608,17 @@ type Mutation {
     """A current code of the authenticator app, at most 20 characters."""
     code: String! @constraint(maxLength: 20)
   ): Boolean!
+  """
+  Copies a persona into a new PRIVATE one owned by the signed-in member: the
+  member's own, or a TEAM one. The copy of someone else's keeps neither their
+  MCP servers nor their projects. 404 `personas.errors.not-found` for a PRIVATE
+  persona of someone else. The copy keeps the model even if it was disabled
+  since: the member may change it, and a conversation refuses a disabled one.
+  """
+  duplicatePersona(
+    """The persona's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Persona!
   """Enables a disabled member again. Administrators only."""
   enableMember(
     """The member's id."""
@@ -656,6 +708,19 @@ type Mutation {
     name: String! @constraint(minLength: 1, maxLength: 100)
   ): Boolean!
   """
+  Puts the featured personas in this order: `ids` first, then the featured ones
+  it leaves out, in their order. Administrators only: 403
+  `auth.errors.forbidden`. All or nothing: an id that is not featured is
+  `personas.errors.not-found` on `ids.<i>` of one `validation.errors.invalid-input`.
+  Answers the featured personas in their new order.
+  """
+  reorderFeatured(
+    """
+    The featured personas' ids, in the wanted order (at most 100, each once).
+    """
+    ids: [ID!]! @constraint(maxItems: 100, maxLength: 64)
+  ): [Persona!]!
+  """
   Sends a password-reset link (`/auth/reset-password`). True once accepted,
   whether or not the e-mail holds an account; throttled as `requestMagicLink`.
   """
@@ -711,6 +776,18 @@ type Mutation {
     id: ID! @constraint(maxLength: 200)
   ): Model!
   """
+  Features a TEAM persona in the catalogue, last in the order (or unfeatures
+  it). Administrators only: 403 `auth.errors.forbidden`. 404
+  `personas.errors.not-found` for a persona that is deleted or not TEAM (a
+  PRIVATE one is never revealed).
+  """
+  setPersonaFeatured(
+    """Whether to feature it."""
+    featured: Boolean!
+    """The persona's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Persona!
+  """
   Signs in with an e-mail and a password. 401 `auth.errors.invalid-credentials`
   for an unknown address, a disabled account and a wrong password alike; 429
   `auth.errors.too-many-attempts` (with `retryAfter`) past the per-address
@@ -739,6 +816,18 @@ type Mutation {
     """The settings to change."""
     input: MemberSettingsInput!
   ): MemberSettings!
+  """
+  Changes the member's own persona. 404 `personas.errors.not-found` for an
+  unknown or PRIVATE one of someone else, 403 `personas.errors.not-owner` for a
+  TEAM one of someone else, 409 `personas.errors.version-conflict` for a stale
+  `version`, 409 `personas.errors.model-unavailable` for a model not enabled.
+  """
+  updatePersona(
+    """The persona's id."""
+    id: ID! @constraint(maxLength: 64)
+    """The changes."""
+    input: UpdatePersonaInput!
+  ): Persona!
 }
 
 """A Nano ID: 21 characters of A-Z, a-z, 0-9, _ and -."""
@@ -823,6 +912,133 @@ type PasskeyChallenge {
   options: JSONObject!
 }
 
+"""
+An AI persona (spec 4.3): the contact a member talks to. A member reads their
+own and the team's; the admin reads the team's only, never a member's PRIVATE
+ones.
+"""
+type Persona {
+  """
+  Key of the avatar file (never a URL): the UI shows a size of it at
+  `/media/persona-avatars/<key>/256` (or `/64`). Null until one is set.
+  """
+  avatarKey: String
+  """When it was created."""
+  createdAt: DateTime!
+  """The model a new conversation with it starts on."""
+  defaultModelId: String!
+  """
+  Whether an administrator features it in the catalogue (a TEAM persona only).
+  """
+  featured: Boolean!
+  """Its place among the featured, from 0; null while not featured."""
+  featuredRank: Int
+  """The persona's id."""
+  id: ID!
+  """Whether the signed-in member owns it (and so may edit and delete it)."""
+  mine: Boolean!
+  """Display name."""
+  name: String!
+  """
+  Its owner: id and name only, for a persona the viewer may already read.
+  """
+  owner: PersonaOwner!
+  """The account id of its owner."""
+  ownerId: ID!
+  """The system prompt: how it behaves and talks."""
+  personality: String!
+  """Ids of the projects it may read (stored as given, not looked up yet)."""
+  projectIds: [String!]!
+  """One line that says who it is."""
+  tagline: String!
+  """What it may use."""
+  tools: PersonaTools!
+  """When it last changed."""
+  updatedAt: DateTime!
+  """Send it back as `version` in an update: a stale one is refused."""
+  version: Int!
+  """Who may see it."""
+  visibility: PersonaVisibility!
+  """
+  The voice it speaks with (stored as given, not looked up yet); null for none.
+  """
+  voiceId: String
+}
+
+"""What the catalogue shows."""
+input PersonaCatalogueFilter {
+  """Only the featured ones, in the administrator's order."""
+  featuredOnly: Boolean = false
+  """
+  Only the personas whose name or tagline contains this text, ignoring case.
+  """
+  search: String @constraint(maxLength: 80)
+}
+
+"""A page of personas."""
+type PersonaConnection {
+  """The personas of the page."""
+  edges: [PersonaEdge!]!
+  """Where the page stands."""
+  pageInfo: PageInfo!
+  """How many personas there are in all."""
+  totalCount: Int!
+}
+
+"""One persona of a page."""
+type PersonaEdge {
+  """The persona."""
+  node: Persona!
+}
+
+"""
+What a persona shows of its owner: the member's id and name, nothing else.
+"""
+type PersonaOwner {
+  """The owner's account id."""
+  id: ID!
+  """The owner's display name."""
+  name: String!
+}
+
+"""What a persona may use in a conversation."""
+type PersonaTools {
+  """Whether it may produce artifacts."""
+  artifacts: Boolean!
+  """
+  Ids of the owner's MCP servers it may call (stored as given, not looked up yet).
+  """
+  mcpServerIds: [String!]!
+  """Whether it keeps a long-term memory."""
+  memory: Boolean!
+  """Whether it may search the web."""
+  webSearch: Boolean!
+}
+
+"""What `PersonaToolsInput` may change; a field left out is kept."""
+input PersonaToolsInput {
+  """Whether it may produce artifacts."""
+  artifacts: Boolean
+  """
+  The MCP servers it may call, replacing the list (at most 20, each up to 64 characters).
+  """
+  mcpServerIds: [String!] @constraint(maxItems: 20, minLength: 1, maxLength: 64)
+  """Whether it keeps a long-term memory."""
+  memory: Boolean
+  """Whether it may search the web."""
+  webSearch: Boolean
+}
+
+"""Who may see a persona."""
+enum PersonaVisibility {
+  """Only its owner."""
+  PRIVATE
+  """
+  Every member reads and starts it, only the owner edits it; others may duplicate it.
+  """
+  TEAM
+}
+
 """A phone number in E.164 form, such as +33612345678."""
 scalar PhoneNumber @specifiedBy(url: "https://www.itu.int/rec/T-REC-E.164")
 
@@ -840,6 +1056,19 @@ Read operations. A signed-in viewer is needed unless a field says otherwise;
 an unauthenticated call is 401 `auth.errors.unauthenticated`.
 """
 type Query {
+  """
+  The TEAM personas, by name (the featured ones, in order, with
+  `featuredOnly`). Every role reads the same list: PRIVATE personas never
+  appear. 400 `personas.errors.invalid-cursor` for a cursor of another list.
+  """
+  catalogue(
+    """The `endCursor` of the page before."""
+    after: String @constraint(maxLength: 500)
+    """What to show."""
+    filter: PersonaCatalogueFilter
+    """Page size, 1 to 100."""
+    first: Int = 20 @constraint(min: 1, max: 100)
+  ): PersonaConnection!
   """
   Every API error message in a language (the request's language when none is
   given: `Accept-Language`, then `lang`, then the cookie, else French). Public:
@@ -902,6 +1131,22 @@ type Query {
     """Also list the models an administrator has not enabled."""
     includeDisabled: Boolean = false
   ): [Model!]!
+  """
+  One persona: the member's own, or a TEAM one. 404 `personas.errors.not-found`
+  for anything else, another member's PRIVATE persona and a deleted one
+  included, for every role.
+  """
+  persona(
+    """The persona's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Persona!
+  """The signed-in member's own personas, most recently changed first."""
+  personas(
+    """The `endCursor` of the page before."""
+    after: String @constraint(maxLength: 500)
+    """Page size, 1 to 100."""
+    first: Int = 20 @constraint(min: 1, max: 100)
+  ): PersonaConnection!
   """
   Answers `pong`: the cheapest round trip through /graphql, for a client or a smoke test.
   """
@@ -1074,6 +1319,40 @@ scalar UUIDv4 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc9562")
 
 """A version 7 (time-ordered) UUID."""
 scalar UUIDv7 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc9562")
+
+"""
+The changes to a persona. A field left out stays as it is; `avatarKey` and
+`voiceId` given as null are cleared; any other field given as null is refused
+(`validation.errors.required` in `extensions.fields`).
+"""
+input UpdatePersonaInput {
+  """
+  An avatar key the member uploaded to `/media/persona-avatars`; null removes the avatar.
+  """
+  avatarKey: String @constraint(maxLength: 64)
+  """The model a new conversation starts on: an enabled model."""
+  defaultModelId: String @constraint(minLength: 1, maxLength: 200)
+  """Display name."""
+  name: String @constraint(minLength: 1, maxLength: 80)
+  """The system prompt."""
+  personality: String @constraint(maxLength: 20000)
+  """
+  The projects it may read, replacing the list (at most 50, each up to 64 characters).
+  """
+  projectIds: [String!] @constraint(maxItems: 50, minLength: 1, maxLength: 64)
+  """One line that says who it is."""
+  tagline: String @constraint(maxLength: 160)
+  """What it may use; only the fields given change."""
+  tools: PersonaToolsInput
+  """
+  The version read: another write since is refused (`personas.errors.version-conflict`). Left out, the change applies to the current version.
+  """
+  version: Int
+  """Who may see it; PRIVATE again unfeatures it."""
+  visibility: PersonaVisibility
+  """The voice it speaks with; null clears it."""
+  voiceId: String @constraint(maxLength: 100)
+}
 
 """A UTC offset from -12:00 to +14:00, such as +05:30."""
 scalar UtcOffset

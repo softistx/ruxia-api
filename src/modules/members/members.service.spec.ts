@@ -32,6 +32,16 @@ describe("MembersService", () => {
     expect((await service.find(admin.userId)).email).toBe(admin.email);
   });
 
+  test("namesOf answers an id and a name per id asked, in order", async () => {
+    const kit = authApp();
+    const admin = await signedInAccount(kit, { role: "admin", name: "Nora" });
+    const service = await serviceOf(kit, admin.token);
+    expect(await service.namesOf([admin.userId, "ghost"])).toEqual([
+      { id: admin.userId, name: "Nora" },
+      { id: "ghost", name: "" },
+    ]);
+  });
+
   test("an unknown id is not-found and a foreign cursor is refused", async () => {
     const kit = authApp();
     const admin = await signedInAccount(kit, { role: "admin" });

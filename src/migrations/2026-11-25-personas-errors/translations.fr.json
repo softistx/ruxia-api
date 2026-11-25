@@ -1,0 +1,7 @@
+{
+  "personas.errors.not-found": "Ce persona n'existe pas.",
+  "personas.errors.not-owner": "Seul le propriétaire d'un persona peut le modifier ou le supprimer. Vous pouvez le dupliquer pour en avoir un à vous.",
+  "personas.errors.model-unavailable": "Le modèle par défaut n'est pas disponible : choisissez un modèle activé par un administrateur.",
+  "personas.errors.version-conflict": "Ce persona a été modifié entre-temps : rechargez-le et réessayez.",
+  "personas.errors.invalid-cursor": "Ce repère de page n'appartient pas à cette liste : repartez de la première page."
+}

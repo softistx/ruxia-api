@@ -37,6 +37,7 @@ const config: CodegenConfig = {
           Passkey: "@softistx/janus#Passkey as JanusPasskey",
           Viewer: "@/auth/viewer#ViewerModel",
           Member: "@/modules/members#MemberDocument",
+          Persona: "@/modules/personas/models#PersonaDocument",
           Invitation: "@/modules/invitations#InvitationView",
           ErrorCatalogue: "@/modules/translations#CatalogueView",
           ErrorMessage: "@/modules/translations#ErrorMessageView",

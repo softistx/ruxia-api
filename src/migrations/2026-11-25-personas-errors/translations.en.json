@@ -1,0 +1,7 @@
+{
+  "personas.errors.not-found": "This persona does not exist.",
+  "personas.errors.not-owner": "Only the owner of a persona can change or delete it. You can duplicate it into your own.",
+  "personas.errors.model-unavailable": "The default model is not available: pick a model an administrator has enabled.",
+  "personas.errors.version-conflict": "This persona was changed in the meantime: reload it and try again.",
+  "personas.errors.invalid-cursor": "This page marker does not belong to this list: start again from the first page."
+}

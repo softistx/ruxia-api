@@ -9,6 +9,7 @@ const minute = 60_000;
 const hour = 60 * minute;
 
 export type IpParams = { ip: string | undefined };
+export type ViewerParams = { viewerId: string };
 
 // What a caller who is not signed in may ask the mailer for: password resets,
 // invitation previews.
@@ -35,5 +36,15 @@ export const clientTokens = defineRateLimit({
   key: (p: IpParams) => ipKey(p.ip),
   limit: 30,
   per: 15 * minute,
+  burst: 10,
+});
+
+// What a member may upload to the media routes (persona avatars): per account,
+// counted before the body is read.
+export const mediaUploads = defineRateLimit({
+  name: "media-uploads",
+  key: (p: ViewerParams) => p.viewerId,
+  limit: 30,
+  per: hour,
   burst: 10,
 });

@@ -2,7 +2,7 @@
 // raises. Nothing here is a GraphQL error: the module that asks maps
 // `Throttled` to its own error.
 export type ClientFamily = "mail" | "credentials" | "tokens";
-export type LimitKind = ClientFamily;
+export type LimitKind = ClientFamily | "uploads";
 
 // A refusal. `retryAfter` is in seconds.
 export class Throttled extends Error {
@@ -27,12 +27,17 @@ export class LimitsUnavailable extends Error {
 // Throws `Throttled` on refusal. The client families fail open when the store
 // is down: a visitor is never locked out by an outage.
 export type ClientLimit = (family: ClientFamily) => Promise<void>;
+// What a member's upload costs, counted before a byte is read (the media
+// routes). Fails open when the store is down: nobody is locked out by an outage.
+export type UploadLimit = () => Promise<void>;
 // The factory the registry binds, per request.
 export type Throttle = {
   client: (ip: string | undefined) => ClientLimit;
+  uploads: (viewerId: string) => UploadLimit;
 };
 
 // For development and tests without Redis: nothing is ever refused.
 export const unthrottled: Throttle = {
   client: () => async () => {},
+  uploads: () => async () => {},
 };

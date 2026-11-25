@@ -1,5 +1,6 @@
 import { health } from "@softistx/alxia";
 import { graphql, type ServerContext } from "@softistx/alxia-graphql";
+import type { MediaBucket } from "@softistx/alxia-media";
 import {
   janusGraxia,
   janusGraxiaMaskError,
@@ -8,6 +9,7 @@ import type { Auth } from "./auth/auth";
 import { janusViewer, type Viewer } from "./auth/viewer";
 import { serverAuth } from "./config/auth";
 import { appMongo, closeDatabases } from "./config/db";
+import { serverMedia } from "./config/media";
 import { redis, serverStatuses, serverThrottle } from "./config/redis";
 import { type Base, type BaseOptions, createBase } from "./http/context";
 import { clientHeader } from "./http/csrf";
@@ -15,6 +17,7 @@ import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
 import type { StatusStore } from "./modules/models";
+import { AvatarsService, avatarRoutes } from "./modules/personas";
 import { type Services, services } from "./modules/services";
 import { cataloguesLoaded } from "./modules/translations";
 
@@ -76,12 +79,15 @@ export function createApp(
     auth?: Auth;
     throttle?: Throttle;
     statuses?: StatusStore;
+    // The private bucket of the media routes: `S3_*`'s by default.
+    media?: MediaBucket;
     catalogues?: () => boolean;
   } = {},
 ) {
   const auth = options.auth ?? serverAuth();
   const throttle = options.throttle ?? serverThrottle;
   const statuses = options.statuses ?? serverStatuses;
+  const media = options.media ?? serverMedia;
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
   const servicesOf = (
     viewer: Viewer | null,
@@ -94,6 +100,14 @@ export function createApp(
       resolveViewer: options.resolveViewer ?? janusViewer(auth),
     })
       .plugin(probes(cataloguesReady))
+      // The files, beside /graphql: the viewer is resolved above, the kinds'
+      // callbacks read it. Mounted before the body limit, which is /graphql's.
+      .plugin(
+        avatarRoutes(
+          { avatars: new AvatarsService(appMongo), throttle },
+          media,
+        ),
+      )
       // A body past 100 KiB is refused (413) before it is read, for /graphql
       // below: a query is a few kilobytes (alxia's production guide, "Cap the body").
       .bodyLimit(BODY_LIMIT)
