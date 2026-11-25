@@ -1,0 +1,16 @@
+{
+  "auth.errors.client-header-required": "The {header} header is required on every request.",
+  "auth.errors.unavailable": "The service is temporarily unavailable. Try again shortly.",
+  "auth.errors.exhausted": "Too many simultaneous changes: the operation did not complete. Try again.",
+  "validation.errors.invalid-input": "Some fields are not valid.",
+  "validation.errors.required": "This field is required.",
+  "validation.errors.invalid": "This value is not valid.",
+  "validation.errors.too-short": "This value is too short: at least {min, plural, one {# character} other {# characters}}.",
+  "validation.errors.too-long": "This value is too long: at most {max, plural, one {# character} other {# characters}}.",
+  "validation.errors.out-of-range": "{bound, select, min {This value is out of range: at least {min}.} max {This value is out of range: at most {max}.} both {This value is out of range: between {min} and {max}.} other {This value is out of range.}}",
+  "validation.errors.no-letter-or-digit": "This name must contain at least one letter or digit.",
+  "validation.errors.query-too-deep": "This query is nested too deeply: at most {max} levels of fields are allowed.",
+  "validation.errors.query-too-costly": "This query is too large: it is estimated at {cost} records (at most {maxCost}). Ask for smaller pages.",
+  "validation.errors.query-too-wide": "This query is too wide: it selects {fields} fields (at most {maxFields}). Ask for fewer fields.",
+  "validation.errors.introspection-disabled": "Schema introspection is disabled on this server."
+}

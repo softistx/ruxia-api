@@ -1,0 +1,128 @@
+"""
+A person with an account on this ruxia. Members are invited, never
+self-registered; an administrator manages them.
+"""
+type Member {
+  "The account's id."
+  id: ID!
+  "Display name."
+  name: String!
+  "The sign-in address."
+  email: EmailAddress!
+  "The member's one role, held in the account system."
+  role: Role!
+  "Key of the member's avatar file; null until one is set."
+  avatarKey: String
+  "The member's language."
+  locale: Language!
+  "When the member joined."
+  createdAt: DateTime!
+  "When the member was disabled (cannot sign in); null while active."
+  disabledAt: DateTime
+}
+
+"One member of a page."
+type MemberEdge {
+  "The member."
+  node: Member!
+}
+
+"A page of members."
+type MemberConnection {
+  "The members of the page."
+  edges: [MemberEdge!]!
+  "Where the page stands."
+  pageInfo: PageInfo!
+  "How many members there are in all."
+  totalCount: Int!
+}
+
+"A member's own settings (spec 4.16), visible to the member alone."
+type MemberSettings {
+  "The language of the app and of the mails."
+  language: Language!
+  "Whether push notifications show the message text."
+  pushPreviews: Boolean!
+  "Whether a voice reply plays by itself."
+  voiceAutoPlay: Boolean!
+  "The persona a new conversation starts with; null until chosen."
+  defaultPersonaId: ID
+  "Whether the persona saves what it learns without asking first."
+  rememberWithoutAsking: Boolean!
+}
+
+"The settings to change; a field left out is kept, `defaultPersonaId: null` clears it."
+input MemberSettingsInput {
+  "The language of the app and of the mails."
+  language: Language
+  "Whether push notifications show the message text."
+  pushPreviews: Boolean
+  "Whether a voice reply plays by itself."
+  voiceAutoPlay: Boolean
+  "The persona a new conversation starts with; null clears it."
+  defaultPersonaId: ID @constraint(maxLength: 64)
+  "Whether the persona saves what it learns without asking first."
+  rememberWithoutAsking: Boolean
+}
+
+"""
+Where the member stands against its budget. A placeholder until budgets land
+(spec 4.12): no limit, nothing spent.
+"""
+type BudgetStatus {
+  "Whether a limit applies to the member."
+  limited: Boolean!
+  "What the member spent this period, in cents."
+  usedCents: Int!
+  "The period's limit in cents; null without one."
+  limitCents: Int
+}
+
+extend type Viewer {
+  "The member's own settings."
+  settings: MemberSettings!
+  "The member's budget status."
+  budget: BudgetStatus!
+}
+
+extend type Query {
+  "A page of the members, oldest first. Administrators only: 403 `auth.errors.forbidden`."
+  members(
+    "How many members to return, at most 100."
+    first: Int = 20 @constraint(min: 1, max: 100)
+    "The cursor of the previous page's end."
+    after: String @constraint(maxLength: 500)
+  ): MemberConnection!
+
+  "One member. Administrators only. 404 `members.errors.not-found`."
+  member("The member's id." id: ID! @constraint(maxLength: 64)): Member!
+}
+
+extend type Mutation {
+  """
+  Gives a member its one role. The last administrator cannot be demoted: 409
+  `members.errors.last-admin`. Administrators only.
+  """
+  setMemberRole(
+    "The member's id."
+    id: ID! @constraint(maxLength: 64)
+    "The role to give."
+    role: Role!
+  ): Member!
+
+  """
+  Disables a member: it is signed out and cannot sign in. The last active
+  administrator cannot be disabled: 409 `members.errors.last-admin`.
+  Administrators only.
+  """
+  disableMember("The member's id." id: ID! @constraint(maxLength: 64)): Member!
+
+  "Enables a disabled member again. Administrators only."
+  enableMember("The member's id." id: ID! @constraint(maxLength: 64)): Member!
+
+  "Changes the signed-in member's own settings and answers them."
+  updateMemberSettings(
+    "The settings to change."
+    input: MemberSettingsInput!
+  ): MemberSettings!
+}

@@ -1,0 +1,258 @@
+"""
+A member's role (CONTEXT.md "Role"): an administrator manages the members and
+the invitations; a member uses the app. One role per account.
+"""
+enum Role {
+  "Manages the members, the invitations and the app's settings."
+  ADMIN
+  "Uses the app; reaches only its own conversations and data."
+  MEMBER
+}
+
+"The signed-in account."
+type Viewer {
+  "Identifier of the account (the user id), also the member's id."
+  id: ID!
+  "The sign-in address."
+  email: EmailAddress!
+  "Display name."
+  name: String!
+  "The account's one role. An account with none is refused: 403 `auth.errors.forbidden`."
+  role: Role!
+  "When the request's session ends: the BFF sets its cookie's expiry to it. Sessions last 7 days and slide."
+  sessionExpiresAt: DateTime
+  "The account's preferred language: the one of its mails and security notices. French until the viewer chooses (updateMemberSettings)."
+  locale: Language!
+  "The account's TOTP second factor: whether it is active, and the recovery codes left."
+  secondFactor: SecondFactorStatus!
+  """
+  Until when the request's session counts as freshly confirmed: its sign-in or
+  its last step-up, plus 10 minutes. In the past when it no longer does; null
+  when no session was read. A second factor or a passkey changes only on a
+  session within it (403 `auth.errors.step-up-required`).
+  """
+  sessionConfirmedUntil: DateTime
+}
+
+"The state of the viewer's TOTP second factor (an authenticator app)."
+type SecondFactorStatus {
+  "Active: sign-in asks for a code of the app."
+  enabled: Boolean!
+  "The recovery codes not yet used; null without an active factor, 0 when all are spent (regenerate them)."
+  recoveryCodesLeft: Int
+}
+
+"""
+A second factor started but not yet active: the secret to load into the
+authenticator app, as text and as an otpauth:// URI. Active only after
+activateSecondFactor accepts the app's first code.
+"""
+type SecondFactorEnrolment {
+  "Base32, for a user who types it in."
+  secret: String!
+  "otpauth://, to show as a QR code."
+  uri: String!
+}
+
+"""
+The recovery codes of a second factor, from activateSecondFactor or
+regenerateRecoveryCodes.
+"""
+type RecoveryCodes {
+  "Ten single-use codes, shown once: no call answers them again."
+  recoveryCodes: [String!]!
+}
+
+"How a step-up is confirmed."
+enum StepUpMethod {
+  "A code of the authenticator app: the account has an active second factor. Nothing is mailed."
+  AUTHENTICATOR
+  "A six-digit code mailed to the account's current address."
+  EMAIL
+}
+
+"A step-up under way: keep `challenge` (never in a URL) and post it to confirmStepUp with the code."
+type StepUpChallenge {
+  "How the code is delivered and confirmed."
+  method: StepUpMethod!
+  "Opaque, single-use value to post to `confirmStepUp` with the code."
+  challenge: String!
+  "When the challenge and its code stop working (10 minutes)."
+  expiresAt: DateTime!
+}
+
+"What a sign-in step answered and what the client does next."
+enum SignInStatus {
+  "Signed in: `token` is the session's, to send as `Authorization: Bearer`."
+  SIGNED_IN
+  """
+  The password was right and the account has a second factor: send a code with
+  `challenge` to confirmSecondFactor (or a recovery code to recoverSecondFactor)
+  before `expiresAt`, five minutes. The challenge is single-use and takes five
+  wrong codes; then sign in again.
+  """
+  SECOND_FACTOR
+}
+
+"""
+What a sign-in or an accepted invitation answers. The token is for a backend
+(the BFF), which keeps it in its own httpOnly cookie and calls the API with
+`Authorization: Bearer <token>`; never readable by the page's scripts, never in
+a URL or in page data.
+"""
+type SignInPayload {
+  "Which of the outcomes happened; the other fields depend on it."
+  status: SignInStatus!
+  "The session token, set only with SIGNED_IN."
+  token: String
+  "SIGNED_IN: when the session ends. SECOND_FACTOR: when the challenge does."
+  expiresAt: DateTime
+  "SECOND_FACTOR: keep it for the next call only."
+  challenge: String
+  "The signed-in account, set only with SIGNED_IN."
+  viewer: Viewer
+}
+
+"The credentials of a password sign-in."
+input SignInInput {
+  "The account's address, at most 320 characters."
+  email: String! @constraint(maxLength: 320)
+  "The password, at most 1024 characters."
+  password: String! @constraint(maxLength: 1024)
+}
+
+"""
+Read operations. A signed-in viewer is needed unless a field says otherwise;
+an unauthenticated call is 401 `auth.errors.unauthenticated`.
+"""
+type Query {
+  "The signed-in account, or null for an anonymous request. Refuses nothing."
+  viewer: Viewer
+}
+
+"""
+Write operations. There is no sign-up: an account exists only through an
+invitation (acceptInvitation).
+"""
+type Mutation {
+  """
+  Signs in with an e-mail and a password. 401 `auth.errors.invalid-credentials`
+  for an unknown address, a disabled account and a wrong password alike; 429
+  `auth.errors.too-many-attempts` (with `retryAfter`) past the per-address
+  limits.
+  """
+  signIn("The credentials." input: SignInInput!): SignInPayload!
+  """
+  The code of the authenticator app, for the challenge signIn (or
+  confirmMagicLink) answered. 400 `auth.errors.invalid-code` (with
+  `attemptsLeft`) for a wrong code, a code already used included;
+  `auth.errors.invalid-token` for a challenge unknown, spent or expired; 429
+  `auth.errors.too-many-attempts` past the per-IP limit on passwords and codes.
+  """
+  confirmSecondFactor(
+    "The `challenge` of the SECOND_FACTOR answer."
+    challenge: String! @constraint(maxLength: 200)
+    "The current code of the authenticator app, at most 20 characters."
+    code: String! @constraint(maxLength: 20)
+  ): SignInPayload!
+  """
+  A recovery code instead of the app's, for a lost phone; each works once. The
+  account is mailed a notice. Refused as confirmSecondFactor.
+  """
+  recoverSecondFactor(
+    "The `challenge` of the SECOND_FACTOR answer."
+    challenge: String! @constraint(maxLength: 200)
+    "One unused recovery code, at most 40 characters."
+    recoveryCode: String! @constraint(maxLength: 40)
+  ): SignInPayload!
+  """
+  Sends a password-reset link (`/auth/reset-password`). True once accepted,
+  whether or not the e-mail holds an account; throttled as `requestMagicLink`.
+  """
+  requestPasswordReset(
+    "The address to mail the link to, at most 320 characters."
+    email: String! @constraint(maxLength: 320)
+  ): Boolean!
+  """
+  Sets a new password from a reset link's token, and signs the account out
+  everywhere: sign in again after it. 400 `auth.errors.invalid-token`, 400
+  `validation.errors.invalid-input` (a `too-short` issue on `password`); 429
+  past the per-IP limit on tokens.
+  """
+  resetPassword(
+    "The token of the reset link, at most 200 characters."
+    token: String! @constraint(maxLength: 200)
+    "The new password; at least 8, at most 1024 characters."
+    password: String! @constraint(maxLength: 1024)
+  ): Boolean!
+  "Revokes the request's session. False when it presented none."
+  signOut: Boolean!
+  """
+  Starts a step-up of the request's session: a code of the authenticator app
+  when the account has an active second factor, else a code mailed to the
+  account's current address. 401 without a viewer; 429
+  `auth.errors.too-many-attempts` past five mailed codes in 10 minutes.
+  """
+  requestStepUp: StepUpChallenge!
+  """
+  Confirms the step-up: the request's session counts as freshly confirmed for
+  10 minutes, and the new `sessionConfirmedUntil` is answered. 400
+  `auth.errors.invalid-code` (with `attemptsLeft`) for a wrong code, and with
+  `reason` `throttled` and `retryAfter` (seconds) once the account's app-code
+  window (five per 15 minutes) is spent;
+  `auth.errors.invalid-token` for a challenge unknown, spent, expired, of
+  another account's session or stale; 409 `auth.errors.second-factor-state`
+  when the second factor changed since requestStepUp (ask again).
+  """
+  confirmStepUp(
+    "The `challenge` of `requestStepUp`."
+    challenge: String! @constraint(maxLength: 200)
+    "The code of the authenticator app or the mailed one, at most 20 characters."
+    code: String! @constraint(maxLength: 20)
+  ): DateTime!
+  """
+  Starts a TOTP second factor: show `uri` as a QR code. Needs a session
+  confirmed within 10 minutes (403 `auth.errors.step-up-required`:
+  requestStepUp, confirmStepUp, then send it again); 409
+  `auth.errors.second-factor-state` when a factor is already active.
+  """
+  enrollSecondFactor: SecondFactorEnrolment!
+  """
+  The first code of the app: the factor is active from now on, and its ten
+  recovery codes are answered, once. Needs a session confirmed within 10
+  minutes (403 `auth.errors.step-up-required`); the tries are counted by the
+  client address (429 `auth.errors.too-many-attempts`). 400
+  `auth.errors.invalid-code`; 409 `auth.errors.second-factor-state` without a
+  started or with an active factor. The account is mailed a notice. Every other
+  session of the account is signed out; the one that activates keeps working.
+  """
+  activateSecondFactor(
+    "The app's first code, at most 20 characters."
+    code: String! @constraint(maxLength: 20)
+  ): RecoveryCodes!
+  """
+  Replaces all the recovery codes with ten new ones, on a current code of the
+  app: the old ones stop working. Needs a session confirmed within 10 minutes
+  (403 `auth.errors.step-up-required`). A wrong code is `auth.errors.invalid-code`
+  (with `attemptsLeft`; past five tries per account in a 15-minute window,
+  every call is refused, the right code included, with `extensions.reason`
+  `throttled` and `extensions.retryAfter` in seconds; janus counts these tries
+  together with the app codes given to confirmStepUp, which disableSecondFactor
+  also goes through); no active factor is
+  `auth.errors.second-factor-state`.
+  """
+  regenerateRecoveryCodes(
+    "A current code of the authenticator app."
+    code: String! @constraint(maxLength: 20)
+  ): RecoveryCodes!
+  """
+  Turns the second factor off, on a current code of the app. Needs a session
+  confirmed within 10 minutes (403 `auth.errors.step-up-required`). A wrong code
+  or no active factor is refused as regenerateRecoveryCodes does. The account is
+  mailed a notice. The factor is optional, for an admin too.
+  """
+  disableSecondFactor(
+    "A current code of the authenticator app, at most 20 characters."
+    code: String! @constraint(maxLength: 20)
+  ): Boolean!
+}

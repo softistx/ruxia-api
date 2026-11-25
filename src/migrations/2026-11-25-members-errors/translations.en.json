@@ -1,0 +1,14 @@
+{
+  "members.errors.not-found": "This member does not exist.",
+  "members.errors.last-admin": "The last administrator cannot be demoted or disabled: name another administrator first.",
+  "members.errors.invalid-cursor": "This page cursor is not valid: start again from the first page.",
+  "invitations.errors.not-found": "This invitation does not exist.",
+  "invitations.errors.not-pending": "This invitation is no longer pending: it cannot be revoked.",
+  "invitations.errors.invalid": "This invitation link is not valid, was already used or has expired. Ask for a new one.",
+  "invitations.errors.already-member": "This address already has an account: sign in instead.",
+  "invitations.errors.already-pending": "This address already has a pending invitation: revoke it first to send another.",
+  "invitations.errors.limit": "Too many pending invitations: revoke some before sending more.",
+  "invitations.errors.refused": "This invitation cannot be accepted.",
+  "invitations.errors.invalid-cursor": "This page cursor is not valid: start again from the first page.",
+  "operator.errors.invalid-arguments": "Invalid arguments."
+}

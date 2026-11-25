@@ -1,0 +1,14 @@
+{
+  "members.errors.not-found": "Ce membre n'existe pas.",
+  "members.errors.last-admin": "Le dernier administrateur ne peut être ni rétrogradé ni désactivé : nommez d'abord un autre administrateur.",
+  "members.errors.invalid-cursor": "Ce curseur de page n'est pas valide : repartez de la première page.",
+  "invitations.errors.not-found": "Cette invitation n'existe pas.",
+  "invitations.errors.not-pending": "Cette invitation n'est plus en attente : elle ne peut pas être révoquée.",
+  "invitations.errors.invalid": "Ce lien d'invitation n'est pas valide, a déjà servi ou a expiré. Demandez-en un nouveau.",
+  "invitations.errors.already-member": "Cette adresse a déjà un compte : connectez-vous plutôt.",
+  "invitations.errors.already-pending": "Cette adresse a déjà une invitation en attente : révoquez-la d'abord pour en envoyer une autre.",
+  "invitations.errors.limit": "Trop d'invitations en attente : révoquez-en avant d'en envoyer d'autres.",
+  "invitations.errors.refused": "Cette invitation ne peut pas être acceptée.",
+  "invitations.errors.invalid-cursor": "Ce curseur de page n'est pas valide : repartez de la première page.",
+  "operator.errors.invalid-arguments": "Arguments invalides."
+}

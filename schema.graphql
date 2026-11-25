@@ -1,0 +1,1052 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+"""
+Validates an argument or an input field when the request arrives, before the resolver runs. A value that breaks a constraint is refused with a BAD_USER_INPUT error whose extensions list each issue with its path and the constraint that refused it; null and omitted values are not checked. Each argument below is one constraint, and they combine on one field.
+"""
+directive @constraint(
+  """
+  The string must contain this text (case-sensitive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  contains: String
+  """
+  The string must end with this text (case-sensitive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  endsWith: String
+  """
+  The number must be strictly less than this value (the value itself is refused). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to Int and Float values.
+  """
+  exclusiveMax: Float
+  """
+  The number must be strictly greater than this value (the value itself is refused). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to Int and Float values.
+  """
+  exclusiveMin: Float
+  """
+  The string must match this named format: byte, date, date-time, email, ipv4, ipv6, uri or uuid, or a format the server registered. An unknown name fails at server startup. Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  format: String
+  """
+  The number must be less than or equal to this value (inclusive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to Int and Float values.
+  """
+  max: Float
+  """
+  The list must hold at most this many items (inclusive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to list values.
+  """
+  maxItems: Int
+  """
+  The string must be at most this many characters long (UTF-16 code units, inclusive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  maxLength: Int
+  """
+  The number must be greater than or equal to this value (inclusive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to Int and Float values.
+  """
+  min: Float
+  """
+  The list must hold at least this many items (inclusive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to list values.
+  """
+  minItems: Int
+  """
+  The string must be at least this many characters long (UTF-16 code units, inclusive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  minLength: Int
+  """
+  The number must be a whole multiple of this value (for example 5 accepts 0, 5 and 10). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to Int and Float values.
+  """
+  multipleOf: Float
+  """
+  The string must not contain this text (case-sensitive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  notContains: String
+  """
+  The string must match this regular expression (JavaScript syntax, not anchored unless it uses ^ and $). An invalid expression fails at server startup. Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  pattern: String
+  """
+  The string must start with this text (case-sensitive). Refused otherwise with a BAD_USER_INPUT error naming the constraint. Applies to String and ID values.
+  """
+  startsWith: String
+) on ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION
+
+"""
+The cost of a field, type, enum, scalar, argument or input field in the query cost limit, following the IBM GraphQL cost specification.
+"""
+directive @cost(
+  """
+  The cost it adds; it replaces the default object or scalar cost for what it marks, and on a field it is added once, not per list item.
+  """
+  weight: Int!
+) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+
+"""
+How many items a list field returns, used to multiply its cost in the query cost limit, following the IBM GraphQL cost specification.
+"""
+directive @listSize(
+  """
+  The list size to assume when no slicing argument gives one; it defaults to the server limits.cost.defaultListSize (10 unless configured) and it also sizes the inner levels of a nested list.
+  """
+  assumedSize: Int
+  """
+  Whether a request must give a non-negative integer for at least one slicing argument, otherwise it is rejected; true by default.
+  """
+  requireOneSlicingArgument: Boolean = true
+  """
+  The fields of the returned object that hold the list (for example the edges of a connection), each sized like this field instead of once.
+  """
+  sizedFields: [String!]
+  """
+  The names of the arguments (a dotted path reaches into an input) whose non-negative integer value is the list size; the largest given one is used.
+  """
+  slicingArguments: [String!]
+) on FIELD_DEFINITION
+
+"""Standard base64 with padding, in its canonical spelling."""
+scalar Base64 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4648#section-4")
+
+"""URL-safe base64 without padding, in its canonical spelling."""
+scalar Base64URL @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4648#section-5")
+
+"""
+An integer of any size, as a decimal string (a safe-integer number is accepted as input).
+"""
+scalar BigInt
+
+"""
+Where the member stands against its budget. A placeholder until budgets land
+(spec 4.12): no limit, nothing spent.
+"""
+type BudgetStatus {
+  """The period's limit in cents; null without one."""
+  limitCents: Int
+  """Whether a limit applies to the member."""
+  limited: Boolean!
+  """What the member spent this period, in cents."""
+  usedCents: Int!
+}
+
+"""An IPv4 block in CIDR notation, such as 10.0.0.0/8."""
+scalar CIDRv4 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4632")
+
+"""An IPv6 block in CIDR notation, such as 2001:db8::/32."""
+scalar CIDRv6 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4291")
+
+"""An ISO 3166-1 alpha-2 country code, such as FR."""
+scalar CountryCode @specifiedBy(url: "https://www.iso.org/iso-3166-country-codes.html")
+
+"""
+A cuid2: a lowercase letter, then lowercase letters and digits, 2 to 32 in all.
+"""
+scalar Cuid2 @specifiedBy(url: "https://github.com/paralleldrive/cuid2")
+
+"""An ISO 4217 currency code, such as EUR."""
+scalar Currency @specifiedBy(url: "https://www.iso.org/iso-4217-currency-codes.html")
+
+"""A calendar date, YYYY-MM-DD, with no time and no time zone."""
+scalar Date @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc3339#section-5.6")
+
+"""An instant: an RFC 3339 date-time with its offset."""
+scalar DateTime @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc3339")
+
+"""An ISO 8601 duration, such as P1DT2H or PT0.5S."""
+scalar Duration @specifiedBy(url: "https://www.iso.org/iso-8601-date-and-time-format.html")
+
+"""An email address."""
+scalar EmailAddress
+
+"""One emoji, such as 👍."""
+scalar Emoji @specifiedBy(url: "https://www.unicode.org/reports/tr51/")
+
+"""
+The API's error messages in one language, for a client that words refusals itself.
+A refusal carries `extensions.code` and `extensions.params`; the client finds the
+code in `messages`, and fills the message with the params (ICU: `{name}`,
+`{count, plural, one {…} other {…}}`, `{count, number}`, `{exitDate, date, long}`).
+The params stay raw: dates are `YYYY-MM-DD` strings and counts are numbers, so
+the message types them. Cache a catalogue per language by `version`.
+"""
+type ErrorCatalogue {
+  """The language of `messages`."""
+  language: Language!
+  """
+  Every error code in code order, each in the language or, where it has no text, in French (the fallback).
+  """
+  messages: [ErrorMessage!]!
+  """
+  Changes whenever a text of the language's catalogue, or of French's which
+  fills it, changes (a translation, a package default, a deploy that adds or
+  rewords one), and it is the same after a restart. It may also change for a
+  text that is no error message. Selecting it alone reads no message.
+  """
+  version: String!
+}
+
+"""One error code with its message text."""
+type ErrorMessage {
+  """`<module>.errors.<slug>`: the `extensions.code` the API answers."""
+  code: String!
+  """
+  The ICU message, uninterpolated, that `extensions.params` fill (raw: `YYYY-MM-DD` dates, numbers).
+  """
+  message: String!
+  """
+  The arguments the message names, each once per kind, in order of appearance
+  (inside plural and select arms too): what a client has to supply, without
+  parsing the ICU itself.
+  """
+  params: [ErrorParam!]!
+}
+
+"""One argument of an error message."""
+type ErrorParam {
+  """How the message uses the argument, so a client formats the raw value."""
+  kind: ErrorParamKind!
+  """The name `extensions.params` gives it."""
+  name: String!
+}
+
+"""How a message uses an argument."""
+enum ErrorParamKind {
+  """`{day, date, long}`: a `YYYY-MM-DD` string formatted as a date."""
+  DATE
+  """`{count, number}`, or the count of a plural."""
+  NUMBER
+  """`{count, plural, one {…} other {…}}`: a number."""
+  PLURAL
+  """`{role, select, a {…} other {…}}`: one of the arms' keys, as text."""
+  SELECT
+  """`{name}`: inserted as it is."""
+  TEXT
+}
+
+"""A GUID: 8-4-4-4-12 hexadecimal digits, with no version check."""
+scalar GUID
+
+"""A CSS hsl() color, such as hsl(120, 100%, 50%)."""
+scalar HSL @specifiedBy(url: "https://www.w3.org/TR/css-color-4/#the-hsl-notation")
+
+"""A CSS hsla() color, such as hsla(120, 100%, 50%, 0.5)."""
+scalar HSLA @specifiedBy(url: "https://www.w3.org/TR/css-color-4/#the-hsl-notation")
+
+"""A CSS hexadecimal color, such as #ff0000."""
+scalar HexColorCode @specifiedBy(url: "https://www.w3.org/TR/css-color-4/#hex-notation")
+
+"""A non-empty string of hexadecimal digits."""
+scalar Hexadecimal
+
+"""A host name, such as api.example.com."""
+scalar Hostname @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc1123")
+
+"""
+An International Bank Account Number, electronic form, such as FR1420041010050500013M02606.
+"""
+scalar IBAN @specifiedBy(url: "https://www.iso.org/standard/81090.html")
+
+"""An IPv4 or IPv6 address."""
+scalar IP @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4291")
+
+"""An IPv4 address in dotted-quad form."""
+scalar IPv4 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc791")
+
+"""An IPv6 address."""
+scalar IPv6 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4291")
+
+"""An ISBN-10 or ISBN-13, digits only, with its check digit verified."""
+scalar ISBN @specifiedBy(url: "https://www.isbn-international.org/content/isbn-users-manual/29")
+
+"""
+An invitation to join, sent by an administrator. There is no public sign-up.
+"""
+type Invitation {
+  """When it was sent."""
+  createdAt: DateTime!
+  """Where the invitation was sent."""
+  email: EmailAddress!
+  """When the link stops working."""
+  expiresAt: DateTime!
+  """The invitation's id."""
+  id: ID!
+  """The administrator who sent it; null for the first administrator."""
+  invitedBy: ID
+  """
+  The name the invitee started with (the part of the address before the @).
+  """
+  name: String!
+  """The role the invitee gets on accepting."""
+  role: Role!
+  """Where the invitation stands."""
+  status: InvitationStatus!
+}
+
+"""A page of invitations."""
+type InvitationConnection {
+  """The invitations of the page."""
+  edges: [InvitationEdge!]!
+  """Where the page stands."""
+  pageInfo: PageInfo!
+  """How many invitations match in all."""
+  totalCount: Int!
+}
+
+"""One invitation of a page."""
+type InvitationEdge {
+  """The invitation."""
+  node: Invitation!
+}
+
+"""What the page of an invitation link shows before the invitee accepts."""
+type InvitationPreview {
+  """The address the invitation was sent to."""
+  email: EmailAddress!
+  """When the link stops working."""
+  expiresAt: DateTime!
+  """The name to start with; the invitee can change it when accepting."""
+  name: String!
+  """The role the invitee gets."""
+  role: Role!
+}
+
+"""Where an invitation stands."""
+enum InvitationStatus {
+  """Accepted: the invitee has an account."""
+  ACCEPTED
+  """Not accepted within its 7 days."""
+  EXPIRED
+  """Sent, not yet accepted and not expired."""
+  PENDING
+  """Revoked by an administrator."""
+  REVOKED
+}
+
+"""Any JSON value."""
+scalar JSON @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc8259")
+
+"""A JSON object."""
+scalar JSONObject @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc8259#section-4")
+
+"""
+A signed JSON Web Token in compact form. Its signature is not verified.
+"""
+scalar JWT @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc7519")
+
+"""A KSUID: 27 characters of base62."""
+scalar KSUID @specifiedBy(url: "https://github.com/segmentio/ksuid")
+
+"""A shipped language: the API's error messages exist in each."""
+enum Language {
+  """English."""
+  EN
+  """French, the default and the fallback of every missing text."""
+  FR
+}
+
+"""A latitude in decimal degrees, from -90 to 90."""
+scalar Latitude
+
+"""A date and a time with no offset, such as 2024-03-10T10:15:30."""
+scalar LocalDateTime
+
+"""A time of day with no offset, such as 10:15 or 10:15:30."""
+scalar LocalTime
+
+"""A BCP 47 language tag in canonical form, such as fr-FR."""
+scalar Locale @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc5646")
+
+"""
+A signed 64-bit integer, as a decimal string (a safe-integer number is accepted as input).
+"""
+scalar Long
+
+"""A longitude in decimal degrees, from -180 to 180."""
+scalar Longitude
+
+"""
+A MAC address: six hex pairs separated by colons (not the IEEE hyphen form).
+"""
+scalar MAC
+
+"""
+A person with an account on this ruxia. Members are invited, never
+self-registered; an administrator manages them.
+"""
+type Member {
+  """Key of the member's avatar file; null until one is set."""
+  avatarKey: String
+  """When the member joined."""
+  createdAt: DateTime!
+  """When the member was disabled (cannot sign in); null while active."""
+  disabledAt: DateTime
+  """The sign-in address."""
+  email: EmailAddress!
+  """The account's id."""
+  id: ID!
+  """The member's language."""
+  locale: Language!
+  """Display name."""
+  name: String!
+  """The member's one role, held in the account system."""
+  role: Role!
+}
+
+"""A page of members."""
+type MemberConnection {
+  """The members of the page."""
+  edges: [MemberEdge!]!
+  """Where the page stands."""
+  pageInfo: PageInfo!
+  """How many members there are in all."""
+  totalCount: Int!
+}
+
+"""One member of a page."""
+type MemberEdge {
+  """The member."""
+  node: Member!
+}
+
+"""A member's own settings (spec 4.16), visible to the member alone."""
+type MemberSettings {
+  """The persona a new conversation starts with; null until chosen."""
+  defaultPersonaId: ID
+  """The language of the app and of the mails."""
+  language: Language!
+  """Whether push notifications show the message text."""
+  pushPreviews: Boolean!
+  """Whether the persona saves what it learns without asking first."""
+  rememberWithoutAsking: Boolean!
+  """Whether a voice reply plays by itself."""
+  voiceAutoPlay: Boolean!
+}
+
+"""
+The settings to change; a field left out is kept, `defaultPersonaId: null` clears it.
+"""
+input MemberSettingsInput {
+  """The persona a new conversation starts with; null clears it."""
+  defaultPersonaId: ID @constraint(maxLength: 64)
+  """The language of the app and of the mails."""
+  language: Language
+  """Whether push notifications show the message text."""
+  pushPreviews: Boolean
+  """Whether the persona saves what it learns without asking first."""
+  rememberWithoutAsking: Boolean
+  """Whether a voice reply plays by itself."""
+  voiceAutoPlay: Boolean
+}
+
+"""
+Write operations. There is no sign-up: an account exists only through an
+invitation (acceptInvitation).
+"""
+type Mutation {
+  """
+  Accepts an invitation: makes the account with its password and signs the
+  invitee in. Anonymous, counted by the caller's address. 400
+  `invitations.errors.invalid` for an unknown, spent or expired token.
+  """
+  acceptInvitation(
+    """The display name, the invitee's own."""
+    name: String! @constraint(maxLength: 200)
+    """The password the account starts with."""
+    password: String! @constraint(maxLength: 1024)
+    """The token of the mailed link."""
+    token: String! @constraint(maxLength: 200)
+  ): SignInPayload!
+  """
+  The first code of the app: the factor is active from now on, and its ten
+  recovery codes are answered, once. Needs a session confirmed within 10
+  minutes (403 `auth.errors.step-up-required`); the tries are counted by the
+  client address (429 `auth.errors.too-many-attempts`). 400
+  `auth.errors.invalid-code`; 409 `auth.errors.second-factor-state` without a
+  started or with an active factor. The account is mailed a notice. Every other
+  session of the account is signed out; the one that activates keeps working.
+  """
+  activateSecondFactor(
+    """The app's first code, at most 20 characters."""
+    code: String! @constraint(maxLength: 20)
+  ): RecoveryCodes!
+  """
+  The code of the authenticator app, for the challenge signIn (or
+  confirmMagicLink) answered. 400 `auth.errors.invalid-code` (with
+  `attemptsLeft`) for a wrong code, a code already used included;
+  `auth.errors.invalid-token` for a challenge unknown, spent or expired; 429
+  `auth.errors.too-many-attempts` past the per-IP limit on passwords and codes.
+  """
+  confirmSecondFactor(
+    """The `challenge` of the SECOND_FACTOR answer."""
+    challenge: String! @constraint(maxLength: 200)
+    """The current code of the authenticator app, at most 20 characters."""
+    code: String! @constraint(maxLength: 20)
+  ): SignInPayload!
+  """
+  Confirms the step-up: the request's session counts as freshly confirmed for
+  10 minutes, and the new `sessionConfirmedUntil` is answered. 400
+  `auth.errors.invalid-code` (with `attemptsLeft`) for a wrong code, and with
+  `reason` `throttled` and `retryAfter` (seconds) once the account's app-code
+  window (five per 15 minutes) is spent;
+  `auth.errors.invalid-token` for a challenge unknown, spent, expired, of
+  another account's session or stale; 409 `auth.errors.second-factor-state`
+  when the second factor changed since requestStepUp (ask again).
+  """
+  confirmStepUp(
+    """The `challenge` of `requestStepUp`."""
+    challenge: String! @constraint(maxLength: 200)
+    """
+    The code of the authenticator app or the mailed one, at most 20 characters.
+    """
+    code: String! @constraint(maxLength: 20)
+  ): DateTime!
+  """
+  Disables a member: it is signed out and cannot sign in. The last active
+  administrator cannot be disabled: 409 `members.errors.last-admin`.
+  Administrators only.
+  """
+  disableMember(
+    """The member's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Member!
+  """
+  Turns the second factor off, on a current code of the app. Needs a session
+  confirmed within 10 minutes (403 `auth.errors.step-up-required`). A wrong code
+  or no active factor is refused as regenerateRecoveryCodes does. The account is
+  mailed a notice. The factor is optional, for an admin too.
+  """
+  disableSecondFactor(
+    """A current code of the authenticator app, at most 20 characters."""
+    code: String! @constraint(maxLength: 20)
+  ): Boolean!
+  """Enables a disabled member again. Administrators only."""
+  enableMember(
+    """The member's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Member!
+  """
+  Starts a TOTP second factor: show `uri` as a QR code. Needs a session
+  confirmed within 10 minutes (403 `auth.errors.step-up-required`:
+  requestStepUp, confirmStepUp, then send it again); 409
+  `auth.errors.second-factor-state` when a factor is already active.
+  """
+  enrollSecondFactor: SecondFactorEnrolment!
+  """
+  Invites an address with a role and mails it the link. Administrators only.
+  409 `invitations.errors.already-member` for an address that has an account,
+  `invitations.errors.already-pending` for one already invited (revoke first),
+  `invitations.errors.limit` past 200 pending.
+  """
+  inviteMember(
+    """The address to invite."""
+    email: EmailAddress!
+    """The role it gets on accepting."""
+    role: Role!
+  ): Invitation!
+  """Starts the registration of a passkey for the viewer."""
+  passkeyRegistrationOptions: PasskeyChallenge!
+  """
+  Starts a passkey sign-in: anonymous, counted by the request's address (429
+  `auth.errors.too-many-attempts`). Finish it with `signInWithPasskey`.
+  """
+  passkeySignInOptions: PasskeyChallenge!
+  """
+  A recovery code instead of the app's, for a lost phone; each works once. The
+  account is mailed a notice. Refused as confirmSecondFactor.
+  """
+  recoverSecondFactor(
+    """The `challenge` of the SECOND_FACTOR answer."""
+    challenge: String! @constraint(maxLength: 200)
+    """One unused recovery code, at most 40 characters."""
+    recoveryCode: String! @constraint(maxLength: 40)
+  ): SignInPayload!
+  """
+  Replaces all the recovery codes with ten new ones, on a current code of the
+  app: the old ones stop working. Needs a session confirmed within 10 minutes
+  (403 `auth.errors.step-up-required`). A wrong code is `auth.errors.invalid-code`
+  (with `attemptsLeft`; past five tries per account in a 15-minute window,
+  every call is refused, the right code included, with `extensions.reason`
+  `throttled` and `extensions.retryAfter` in seconds; janus counts these tries
+  together with the app codes given to confirmStepUp, which disableSecondFactor
+  also goes through); no active factor is
+  `auth.errors.second-factor-state`.
+  """
+  regenerateRecoveryCodes(
+    """A current code of the authenticator app."""
+    code: String! @constraint(maxLength: 20)
+  ): RecoveryCodes!
+  """
+  Finishes it. Needs a session confirmed within 10 minutes (403
+  `auth.errors.step-up-required`). 400 `auth.errors.passkey-invalid` (a response
+  that does not verify, a bad name); 409 `auth.errors.passkey-taken` for a
+  credential already registered and `auth.errors.passkey-limit` past the most an
+  account may hold.
+  """
+  registerPasskey(
+    """The `challenge` of `passkeyRegistrationOptions`."""
+    challenge: String! @constraint(maxLength: 200)
+    """The name to give it, 1 to 100 characters."""
+    name: String! @constraint(minLength: 1, maxLength: 100)
+    """What `navigator.credentials.create` produced."""
+    response: JSONObject!
+  ): Passkey!
+  """
+  Removes one of the viewer's passkeys; false for one that is not theirs. Needs
+  a session confirmed within 10 minutes (403 `auth.errors.step-up-required`).
+  """
+  removePasskey(
+    """The passkey's credential id."""
+    id: ID! @constraint(maxLength: 200)
+  ): Boolean!
+  """
+  Renames one of the viewer's passkeys; false for one that is not theirs.
+  """
+  renamePasskey(
+    """The passkey's credential id."""
+    id: ID! @constraint(maxLength: 200)
+    """The new name, 1 to 100 characters."""
+    name: String! @constraint(minLength: 1, maxLength: 100)
+  ): Boolean!
+  """
+  Sends a password-reset link (`/auth/reset-password`). True once accepted,
+  whether or not the e-mail holds an account; throttled as `requestMagicLink`.
+  """
+  requestPasswordReset(
+    """The address to mail the link to, at most 320 characters."""
+    email: String! @constraint(maxLength: 320)
+  ): Boolean!
+  """
+  Starts a step-up of the request's session: a code of the authenticator app
+  when the account has an active second factor, else a code mailed to the
+  account's current address. 401 without a viewer; 429
+  `auth.errors.too-many-attempts` past five mailed codes in 10 minutes.
+  """
+  requestStepUp: StepUpChallenge!
+  """
+  Sets a new password from a reset link's token, and signs the account out
+  everywhere: sign in again after it. 400 `auth.errors.invalid-token`, 400
+  `validation.errors.invalid-input` (a `too-short` issue on `password`); 429
+  past the per-IP limit on tokens.
+  """
+  resetPassword(
+    """The new password; at least 8, at most 1024 characters."""
+    password: String! @constraint(maxLength: 1024)
+    """The token of the reset link, at most 200 characters."""
+    token: String! @constraint(maxLength: 200)
+  ): Boolean!
+  """
+  Cancels a pending invitation. Administrators only. 404 `invitations.errors.not-found`, 409 `invitations.errors.not-pending`.
+  """
+  revokeInvitation(
+    """The invitation's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Invitation!
+  """
+  Gives a member its one role. The last administrator cannot be demoted: 409
+  `members.errors.last-admin`. Administrators only.
+  """
+  setMemberRole(
+    """The member's id."""
+    id: ID! @constraint(maxLength: 64)
+    """The role to give."""
+    role: Role!
+  ): Member!
+  """
+  Signs in with an e-mail and a password. 401 `auth.errors.invalid-credentials`
+  for an unknown address, a disabled account and a wrong password alike; 429
+  `auth.errors.too-many-attempts` (with `retryAfter`) past the per-address
+  limits.
+  """
+  signIn(
+    """The credentials."""
+    input: SignInInput!
+  ): SignInPayload!
+  """
+  Finishes a passkey sign-in with what `navigator.credentials.get` produced. No
+  password and no code: the device's verification is the whole proof. 401
+  `auth.errors.invalid-credentials` for any refusal; 400
+  `auth.errors.invalid-token` for a challenge unknown, spent or lapsed.
+  """
+  signInWithPasskey(
+    """The `challenge` of `passkeySignInOptions`."""
+    challenge: String! @constraint(maxLength: 200)
+    """The browser's JSON, as received."""
+    response: JSONObject!
+  ): SignInPayload!
+  """Revokes the request's session. False when it presented none."""
+  signOut: Boolean!
+  """Changes the signed-in member's own settings and answers them."""
+  updateMemberSettings(
+    """The settings to change."""
+    input: MemberSettingsInput!
+  ): MemberSettings!
+}
+
+"""A Nano ID: 21 characters of A-Z, a-z, 0-9, _ and -."""
+scalar NanoID @specifiedBy(url: "https://github.com/ai/nanoid")
+
+"""A finite number below 0."""
+scalar NegativeFloat
+
+"""An integer from -2147483648 to -1."""
+scalar NegativeInt
+
+"""A string that is not empty and not only white space."""
+scalar NonEmptyString
+
+"""A finite number, 0 or above."""
+scalar NonNegativeFloat
+
+"""An integer from 0 to 2147483647."""
+scalar NonNegativeInt
+
+"""A finite number, 0 or below."""
+scalar NonPositiveFloat
+
+"""An integer from -2147483648 to 0."""
+scalar NonPositiveInt
+
+"""A MongoDB ObjectId: 24 hexadecimal digits."""
+scalar ObjectID @specifiedBy(url: "https://www.mongodb.com/docs/manual/reference/method/ObjectId/")
+
+"""
+Where a page of a list ends. Paging is forward only: `endCursor` is the
+`after` of the next page; to go back, a client keeps the cursors it has
+visited. `startCursor` is the `after` this page was asked with, and
+`hasPreviousPage` says whether it was given.
+"""
+type PageInfo {
+  """
+  Opaque cursor of the last item of the page: pass it as `after` to read the
+  next page. Null when the page is empty.
+  """
+  endCursor: String
+  """Whether more items follow this page."""
+  hasNextPage: Boolean!
+  """Whether this page was asked with an `after`, so it is not the first."""
+  hasPreviousPage: Boolean!
+  """
+  The `after` this page was asked with; null on the first page or an empty one.
+  """
+  startCursor: String
+}
+
+"""
+A passkey of the viewer: a credential held by a device or a password manager.
+"""
+type Passkey {
+  """Whether the credential is synced across the viewer's devices."""
+  backedUp: Boolean!
+  """When it was registered."""
+  createdAt: DateTime!
+  """
+  The authenticator's credential id (base64url): what `renamePasskey` and `removePasskey` name.
+  """
+  id: ID!
+  """When it last signed in, or null when it never has."""
+  lastUsedAt: DateTime
+  """The name the viewer gave it, 1 to 100 characters."""
+  name: String!
+}
+
+"""
+What the browser needs to make or use a passkey: `options` goes to
+`navigator.credentials.create` (registration) or `.get` (sign-in), and
+`challenge` is kept for the call that finishes the flow. One challenge is one
+attempt.
+"""
+type PasskeyChallenge {
+  """Keep it for the next call only (never in a URL)."""
+  challenge: String!
+  """When the challenge stops working."""
+  expiresAt: DateTime!
+  """The JSON for the WebAuthn call of the browser."""
+  options: JSONObject!
+}
+
+"""A phone number in E.164 form, such as +33612345678."""
+scalar PhoneNumber @specifiedBy(url: "https://www.itu.int/rec/T-REC-E.164")
+
+"""A TCP or UDP port number, from 0 to 65535."""
+scalar Port
+
+"""A finite number above 0."""
+scalar PositiveFloat
+
+"""An integer from 1 to 2147483647."""
+scalar PositiveInt
+
+"""
+Read operations. A signed-in viewer is needed unless a field says otherwise;
+an unauthenticated call is 401 `auth.errors.unauthenticated`.
+"""
+type Query {
+  """
+  Every API error message in a language (the request's language when none is
+  given: `Accept-Language`, then `lang`, then the cookie, else French). Public:
+  sign-in screens need it, so no viewer is asked for. Word
+  a refusal by taking `messages` for its `extensions.code` and filling it with
+  its `extensions.params`.
+  """
+  errorCatalogue(
+    """The catalogue's language; the request's language when omitted."""
+    language: Language
+  ): ErrorCatalogue!
+  """
+  The `version` of `errorCatalogue(language)`, a cheap read to revalidate a
+  cached catalogue. Public.
+  """
+  errorCatalogueVersion(
+    """The catalogue's language; the request's language when omitted."""
+    language: Language
+  ): String!
+  """
+  What an invitation link is for, by its token. Anonymous, counted by the
+  caller's address. 400 `invitations.errors.invalid` for an unknown, spent or
+  expired token.
+  """
+  invitationPreview(
+    """The token of the mailed link."""
+    token: String! @constraint(maxLength: 200)
+  ): InvitationPreview!
+  """
+  A page of the invitations, newest first. Administrators only: 403 `auth.errors.forbidden`.
+  """
+  invitations(
+    """The cursor of the previous page's end."""
+    after: String @constraint(maxLength: 500)
+    """How many invitations to return, at most 100."""
+    first: Int = 20 @constraint(min: 1, max: 100)
+    """Only the invitations in this state."""
+    status: InvitationStatus
+  ): InvitationConnection!
+  """One member. Administrators only. 404 `members.errors.not-found`."""
+  member(
+    """The member's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Member!
+  """
+  A page of the members, oldest first. Administrators only: 403 `auth.errors.forbidden`.
+  """
+  members(
+    """The cursor of the previous page's end."""
+    after: String @constraint(maxLength: 500)
+    """How many members to return, at most 100."""
+    first: Int = 20 @constraint(min: 1, max: 100)
+  ): MemberConnection!
+  """
+  Answers `pong`: the cheapest round trip through /graphql, for a client or a smoke test.
+  """
+  ping: String!
+  """
+  The signed-in account, or null for an anonymous request. Refuses nothing.
+  """
+  viewer: Viewer
+}
+
+"""A CSS rgb() color, such as rgb(255, 0, 0)."""
+scalar RGB @specifiedBy(url: "https://www.w3.org/TR/css-color-4/#rgb-functions")
+
+"""A CSS rgba() color, such as rgba(255, 0, 0, 0.5)."""
+scalar RGBA @specifiedBy(url: "https://www.w3.org/TR/css-color-4/#rgb-functions")
+
+"""
+The recovery codes of a second factor, from activateSecondFactor or
+regenerateRecoveryCodes.
+"""
+type RecoveryCodes {
+  """Ten single-use codes, shown once: no call answers them again."""
+  recoveryCodes: [String!]!
+}
+
+"""
+A member's role (CONTEXT.md "Role"): an administrator manages the members and
+the invitations; a member uses the app. One role per account.
+"""
+enum Role {
+  """Manages the members, the invitations and the app's settings."""
+  ADMIN
+  """Uses the app; reaches only its own conversations and data."""
+  MEMBER
+}
+
+"""A SHA-256 digest: 64 hexadecimal digits."""
+scalar SHA256 @specifiedBy(url: "https://csrc.nist.gov/pubs/fips/180-4/upd1/final")
+
+"""A SHA-512 digest: 128 hexadecimal digits."""
+scalar SHA512 @specifiedBy(url: "https://csrc.nist.gov/pubs/fips/180-4/upd1/final")
+
+"""An integer from -9007199254740991 to 9007199254740991."""
+scalar SafeInt
+
+"""
+A second factor started but not yet active: the secret to load into the
+authenticator app, as text and as an otpauth:// URI. Active only after
+activateSecondFactor accepts the app's first code.
+"""
+type SecondFactorEnrolment {
+  """Base32, for a user who types it in."""
+  secret: String!
+  """otpauth://, to show as a QR code."""
+  uri: String!
+}
+
+"""The state of the viewer's TOTP second factor (an authenticator app)."""
+type SecondFactorStatus {
+  """Active: sign-in asks for a code of the app."""
+  enabled: Boolean!
+  """
+  The recovery codes not yet used; null without an active factor, 0 when all are spent (regenerate them).
+  """
+  recoveryCodesLeft: Int
+}
+
+"""A Semantic Versioning 2.0.0 version, such as 1.0.0-rc.1."""
+scalar SemVer @specifiedBy(url: "https://semver.org/spec/v2.0.0.html")
+
+"""The credentials of a password sign-in."""
+input SignInInput {
+  """The account's address, at most 320 characters."""
+  email: String! @constraint(maxLength: 320)
+  """The password, at most 1024 characters."""
+  password: String! @constraint(maxLength: 1024)
+}
+
+"""
+What a sign-in or an accepted invitation answers. The token is for a backend
+(the BFF), which keeps it in its own httpOnly cookie and calls the API with
+`Authorization: Bearer <token>`; never readable by the page's scripts, never in
+a URL or in page data.
+"""
+type SignInPayload {
+  """SECOND_FACTOR: keep it for the next call only."""
+  challenge: String
+  """
+  SIGNED_IN: when the session ends. SECOND_FACTOR: when the challenge does.
+  """
+  expiresAt: DateTime
+  """Which of the outcomes happened; the other fields depend on it."""
+  status: SignInStatus!
+  """The session token, set only with SIGNED_IN."""
+  token: String
+  """The signed-in account, set only with SIGNED_IN."""
+  viewer: Viewer
+}
+
+"""What a sign-in step answered and what the client does next."""
+enum SignInStatus {
+  """
+  The password was right and the account has a second factor: send a code with
+  `challenge` to confirmSecondFactor (or a recovery code to recoverSecondFactor)
+  before `expiresAt`, five minutes. The challenge is single-use and takes five
+  wrong codes; then sign in again.
+  """
+  SECOND_FACTOR
+  """
+  Signed in: `token` is the session's, to send as `Authorization: Bearer`.
+  """
+  SIGNED_IN
+}
+
+"""
+The direction of a sort. ASC is the order the sorted field documents as its
+own; DESC is its exact reverse, ties included.
+"""
+enum SortDirection {
+  """The documented order."""
+  ASC
+  """The reverse of the documented order."""
+  DESC
+}
+
+"""
+A step-up under way: keep `challenge` (never in a URL) and post it to confirmStepUp with the code.
+"""
+type StepUpChallenge {
+  """Opaque, single-use value to post to `confirmStepUp` with the code."""
+  challenge: String!
+  """When the challenge and its code stop working (10 minutes)."""
+  expiresAt: DateTime!
+  """How the code is delivered and confirmed."""
+  method: StepUpMethod!
+}
+
+"""How a step-up is confirmed."""
+enum StepUpMethod {
+  """
+  A code of the authenticator app: the account has an active second factor. Nothing is mailed.
+  """
+  AUTHENTICATOR
+  """A six-digit code mailed to the account's current address."""
+  EMAIL
+}
+
+"""A time of day with its offset, such as 10:15:30Z (RFC 3339 full-time)."""
+scalar Time @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc3339#section-5.6")
+
+"""An IANA time zone name, such as Europe/Paris."""
+scalar TimeZone @specifiedBy(url: "https://www.iana.org/time-zones")
+
+"""
+An instant, as an integer number of milliseconds since 1970-01-01T00:00:00Z.
+"""
+scalar Timestamp
+
+"""A ULID: 26 characters of Crockford base32."""
+scalar ULID @specifiedBy(url: "https://github.com/ulid/spec")
+
+"""An absolute http or https URL."""
+scalar URL @specifiedBy(url: "https://url.spec.whatwg.org/")
+
+"""A UUID in its 8-4-4-4-12 hexadecimal form."""
+scalar UUID @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc9562")
+
+"""A version 4 (random) UUID."""
+scalar UUIDv4 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc9562")
+
+"""A version 7 (time-ordered) UUID."""
+scalar UUIDv7 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc9562")
+
+"""A UTC offset from -12:00 to +14:00, such as +05:30."""
+scalar UtcOffset
+
+"""The signed-in account."""
+type Viewer {
+  """The member's budget status."""
+  budget: BudgetStatus!
+  """The sign-in address."""
+  email: EmailAddress!
+  """Identifier of the account (the user id), also the member's id."""
+  id: ID!
+  """
+  The account's preferred language: the one of its mails and security notices. French until the viewer chooses (updateMemberSettings).
+  """
+  locale: Language!
+  """Display name."""
+  name: String!
+  """The viewer's passkeys, oldest first."""
+  passkeys: [Passkey!]!
+  """
+  The account's one role. An account with none is refused: 403 `auth.errors.forbidden`.
+  """
+  role: Role!
+  """
+  The account's TOTP second factor: whether it is active, and the recovery codes left.
+  """
+  secondFactor: SecondFactorStatus!
+  """
+  Until when the request's session counts as freshly confirmed: its sign-in or
+  its last step-up, plus 10 minutes. In the past when it no longer does; null
+  when no session was read. A second factor or a passkey changes only on a
+  session within it (403 `auth.errors.step-up-required`).
+  """
+  sessionConfirmedUntil: DateTime
+  """
+  When the request's session ends: the BFF sets its cookie's expiry to it. Sessions last 7 days and slide.
+  """
+  sessionExpiresAt: DateTime
+  """The member's own settings."""
+  settings: MemberSettings!
+}
+
+"""No value: always null."""
+scalar Void
+
+"""An xid: 20 characters of lowercase base32hex."""
+scalar XID @specifiedBy(url: "https://github.com/rs/xid")

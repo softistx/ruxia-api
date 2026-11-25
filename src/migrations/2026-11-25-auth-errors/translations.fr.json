@@ -1,0 +1,13 @@
+{
+  "auth.errors.unauthenticated": "Connectez-vous pour continuer.",
+  "auth.errors.forbidden": "Vous n'avez pas le droit d'effectuer cette action.",
+  "auth.errors.invalid-credentials": "Adresse e-mail ou mot de passe incorrect.",
+  "auth.errors.invalid-token": "Ce lien n'est pas valide ou a expiré : demandez-en un nouveau.",
+  "auth.errors.too-many-attempts": "Trop de tentatives. Réessayez dans {minutes, plural, one {# minute} other {# minutes}}.",
+  "auth.errors.invalid-code": "Ce code n'est pas correct.",
+  "auth.errors.second-factor-state": "La double authentification n'est pas dans l'état attendu. Rechargez la page et réessayez.",
+  "auth.errors.step-up-required": "Cette opération demande une confirmation récente de votre identité : confirmez-la avec un code, puis recommencez.",
+  "auth.errors.passkey-invalid": "La clé d'accès a été refusée. Réessayez ou utilisez un autre moyen de connexion.",
+  "auth.errors.passkey-limit": "Vous avez atteint le nombre maximal de clés d'accès. Supprimez-en une pour en ajouter une autre.",
+  "auth.errors.passkey-taken": "Cette clé d'accès est déjà enregistrée."
+}

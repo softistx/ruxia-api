@@ -1,0 +1,8 @@
+"""
+Read operations. Most need a signed-in member, and some an administrator, named
+on each field; an unauthenticated call is 401 `auth.errors.unauthenticated`.
+"""
+type Query {
+  "Answers `pong`: the cheapest round trip through /graphql, for a client or a smoke test."
+  ping: String!
+}
