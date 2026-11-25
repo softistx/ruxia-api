@@ -435,6 +435,58 @@ input MemberSettingsInput {
 }
 
 """
+A model a conversation may pick (spec 2). Claude models are seeded; Ollama
+models are found by a probe and stay disabled until an administrator enables
+them.
+"""
+type Model {
+  """
+  Whether a send to it can succeed now. Always true for a Claude model; an
+  Ollama model is available while its server answers and has it installed
+  (a probe every 30 seconds), so false means "offline".
+  """
+  available: Boolean!
+  """What it can do."""
+  capabilities: [ModelCapability!]!
+  """How many tokens of context it holds."""
+  contextWindow: Int!
+  """Whether an administrator allows conversations to use it."""
+  enabled: Boolean!
+  """The model's public id, e.g. `claude-sonnet-5-5` or `ollama:qwen3:14b`."""
+  id: ID!
+  """USD per million input tokens; null when it is free."""
+  inputPrice: Float
+  """The name shown to people."""
+  label: String!
+  """USD per million output tokens; null when it is free."""
+  outputPrice: Float
+  """Who serves it."""
+  provider: ModelProvider!
+}
+
+"""What a model can do in a conversation."""
+enum ModelCapability {
+  """It can think before answering."""
+  THINKING
+  """It can call tools."""
+  TOOLS
+  """It reads images."""
+  VISION
+  """It can search the web through the provider's own tool."""
+  WEB_SEARCH
+}
+
+"""Who serves a model."""
+enum ModelProvider {
+  """Anthropic's Claude API."""
+  ANTHROPIC
+  """
+  An Ollama server (the owner's Mac): free, and offline when the Mac is off.
+  """
+  OLLAMA
+}
+
+"""
 Write operations. There is no sign-up: an account exists only through an
 invitation (acceptInvitation).
 """
@@ -648,6 +700,17 @@ type Mutation {
     role: Role!
   ): Member!
   """
+  Enables or disables a model for conversations (a no-op when it already is).
+  Administrators only: 403 `auth.errors.forbidden`. 404
+  `models.errors.not-found` for an id that names no model.
+  """
+  setModelEnabled(
+    """Whether conversations may use it."""
+    enabled: Boolean!
+    """The model's public id."""
+    id: ID! @constraint(maxLength: 200)
+  ): Model!
+  """
   Signs in with an e-mail and a password. 401 `auth.errors.invalid-credentials`
   for an unknown address, a disabled account and a wrong password alike; 429
   `auth.errors.too-many-attempts` (with `retryAfter`) past the per-address
@@ -830,6 +893,15 @@ type Query {
     """How many members to return, at most 100."""
     first: Int = 20 @constraint(min: 1, max: 100)
   ): MemberConnection!
+  """
+  The models, Claude first, then by name. Members see the enabled ones;
+  `includeDisabled: true` also lists the disabled and is for administrators
+  only: 403 `auth.errors.forbidden`.
+  """
+  models(
+    """Also list the models an administrator has not enabled."""
+    includeDisabled: Boolean = false
+  ): [Model!]!
   """
   Answers `pong`: the cheapest round trip through /graphql, for a client or a smoke test.
   """

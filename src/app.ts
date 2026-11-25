@@ -8,12 +8,13 @@ import type { Auth } from "./auth/auth";
 import { janusViewer, type Viewer } from "./auth/viewer";
 import { serverAuth } from "./config/auth";
 import { appMongo, closeDatabases } from "./config/db";
-import { redis, serverThrottle } from "./config/redis";
+import { redis, serverStatuses, serverThrottle } from "./config/redis";
 import { type Base, type BaseOptions, createBase } from "./http/context";
 import { clientHeader } from "./http/csrf";
 import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
+import type { StatusStore } from "./modules/models";
 import { type Services, services } from "./modules/services";
 import { cataloguesLoaded } from "./modules/translations";
 
@@ -74,17 +75,19 @@ export function createApp(
   options: BaseOptions & {
     auth?: Auth;
     throttle?: Throttle;
+    statuses?: StatusStore;
     catalogues?: () => boolean;
   } = {},
 ) {
   const auth = options.auth ?? serverAuth();
   const throttle = options.throttle ?? serverThrottle;
+  const statuses = options.statuses ?? serverStatuses;
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
   const servicesOf = (
     viewer: Viewer | null,
     request: Request,
     ip: string | undefined,
-  ) => services({ auth, request, viewer, throttle, clientIp: ip });
+  ) => services({ auth, request, viewer, throttle, clientIp: ip, statuses });
   return (
     createBase({
       ...options,

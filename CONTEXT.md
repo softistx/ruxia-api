@@ -14,9 +14,13 @@ that introduces it. The specification is [docs/spec.md](docs/spec.md).
 | Viewer         | utilisateur | The signed-in member as the session shows it: role, locale, second factor, passkeys, budget status.                              |
 | MemberSettings | réglages    | Language fr/en, push previews, voice auto-play, default persona, "remember without asking" (spec 4.16).                          |
 | BudgetStatus   | budget      | A placeholder until budgets land: no limit, nothing spent.                                                                       |
+| Model          | modèle      | An entry of the model catalogue (`models`): public id, provider (Claude or Ollama), label, capabilities, context window, prices. |
+| Enabled        | activé      | A model an admin allows conversations to use. Claude models start enabled; discovered Ollama models start disabled.              |
+| Available      | disponible  | A model a send can reach now: always for Claude, for Ollama while the last probe saw its server up with the model installed.     |
+| Probe          | sonde       | The check of the Ollama server every 30 s (`OLLAMA_BASE_URL`), cached in Redis for 90 s, which also lists new installed models.  |
 
 Modules: `accounts` (sign-in, second factor, passkeys, step-up), `members`, `invitations`,
-`translations` and `system`. Operator scripts: `admin:create <email>` (issues an admin
+`models`, `translations` and `system`. Operator scripts: `admin:create <email>` (issues an admin
 invitation and mails it; `--print-link` prints the link), `db:sync`, `db:migrate`,
 `schema:print`.
 
@@ -63,5 +67,8 @@ inventory is `src/i18n/codes.ts`.
 | `members.errors.not-found`           | An id that names no member.                                                  |
 | `members.errors.last-admin`          | Demoting or disabling the last active administrator.                         |
 | `members.errors.invalid-cursor`      | A cursor that does not belong to the list.                                   |
+| `models.errors.not-found`            | An id that names no model of the catalogue (404).                            |
+| `models.errors.disabled`             | Sending to a model an admin has not enabled (409).                           |
+| `models.errors.offline`              | Sending to an Ollama model whose server is off or lacks it (409).            |
 | `operator.errors.invalid-arguments`  | An operator script run with wrong arguments.                                 |
 | `validation.errors.*`                | An input refused: `invalid-input` and each field's reason; the query limits. |

@@ -219,3 +219,17 @@ test("MCP_HOSTNAME and API_ORIGIN are gone: set, they change nothing", async () 
   expect("API_ORIGIN" in env).toBe(false);
   expect(env.UI_ORIGIN).toBe("https://app.ruxia.example");
 });
+
+test("OLLAMA_BASE_URL is optional, empty is unset, and must be an http(s) URL", async () => {
+  expect((await load({ OLLAMA_BASE_URL: undefined })).env.OLLAMA_BASE_URL).toBe(
+    undefined,
+  );
+  expect((await load({ OLLAMA_BASE_URL: "" })).env.OLLAMA_BASE_URL).toBe(
+    undefined,
+  );
+  expect(
+    (await load({ OLLAMA_BASE_URL: "http://100.64.0.2:11434" })).env
+      .OLLAMA_BASE_URL,
+  ).toBe("http://100.64.0.2:11434");
+  await expect(load({ OLLAMA_BASE_URL: "mac.local" })).rejects.toThrow();
+});

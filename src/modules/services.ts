@@ -11,6 +11,7 @@ import {
 } from "./accounts";
 import { InvitationsService } from "./invitations";
 import { MembersService } from "./members";
+import { ModelsService, type StatusStore } from "./models";
 import { loadedCatalogues, TranslationsService } from "./translations";
 
 // What a request builds anew, so none is shared between requests: the
@@ -22,6 +23,7 @@ export function services(deps: {
   viewer: Viewer | null;
   throttle: Throttle;
   clientIp: string | undefined;
+  statuses: StatusStore;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
   return {
@@ -42,6 +44,7 @@ export function services(deps: {
       limit,
       () => new Date(),
     ),
+    models: new ModelsService(appMongo, deps.statuses),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
     ),

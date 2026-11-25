@@ -7,6 +7,9 @@
       "dependencies": {
         "@graphql-tools/load-files": "^8.0.9",
         "@graphql-tools/merge": "^10.0.9",
+        "@softistx/ai-anthropic": "^0.5.0",
+        "@softistx/ai-core": "^0.8.0",
+        "@softistx/ai-ollama": "^0.4.0",
         "@softistx/alxia": "^0.28.0",
         "@softistx/alxia-env": "^0.6.0",
         "@softistx/alxia-graphql": "^0.20.1",
@@ -21,7 +24,7 @@
         "@softistx/janus-graphql": "^0.38.2",
         "@softistx/janus-mail": "^0.26.25",
         "@softistx/janus-mongo": "^0.33.1",
-        "@softistx/janus-passkeys": "latest",
+        "@softistx/janus-passkeys": "^0.3.29",
         "@softistx/mail": "^1.6.1",
         "@softistx/mail-smtp": "^1.1.1",
         "@softistx/mongo": "^0.31.0",
@@ -42,6 +45,7 @@
         "@graphql-codegen/typescript-resolvers": "7.0.1",
         "@graphql-tools/utils": "^13.2.2",
         "@graphql-typed-document-node/core": "^3.2.0",
+        "@softistx/ai-testing": "^0.3.3",
         "@softistx/graphql-codegen-zod": "^0.6.0",
         "@types/bun": "^1.4.5",
         "@types/nodemailer": "^8.0.2",
@@ -283,6 +287,14 @@
     "@repeaterjs/repeater": ["@repeaterjs/repeater@3.1.0", "", {}, "sha512-TaoVksZRSx2KWYYpyLQtMQXXeS98VsgZImzW65xmiVgbYhXLk+aEsmzPLirqVuE4/XuUapH2iMtxUzaBNDzdSQ=="],
 
     "@simplewebauthn/server": ["@simplewebauthn/server@14.1.0", "", { "dependencies": { "@hexagon/base64": "^1.1.27", "@levischuck/tiny-cbor": "^0.2.2", "@peculiar/asn1-android": "^2.6.0", "@peculiar/asn1-ecc": "^2.6.1", "@peculiar/asn1-rsa": "^2.6.1", "@peculiar/asn1-schema": "^2.6.0", "@peculiar/asn1-x509": "^2.6.1", "@peculiar/asn1-x509-post-quantum": "^2.9.4", "@peculiar/x509": "^2.1.0", "reflect-metadata": "^0.2.2" } }, "sha512-HPRRBR4Vzr45+RVvbmf6JuCfGdYYcSs4Pnnnp9YSY2IABa4JKnG+wxybczoB7rmdLCOMS/mbBa2ZL/Bcz58UlA=="],
+
+    "@softistx/ai-anthropic": ["@softistx/ai-anthropic@0.5.0", "", { "peerDependencies": { "@softistx/ai-core": "^0.8.0", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-oh7ePokGVSzvxqUF9rHk2AeUp3Z8MfiSjJQyv1DZ1DrI4M8roOWMrVq9AbPrfZBHOFmFRSjtAsrQ8I5UwSVwBA=="],
+
+    "@softistx/ai-core": ["@softistx/ai-core@0.8.0", "", { "peerDependencies": { "typescript": "^6.0.3 || ^7.0.0", "zod": ">=4.6.5 <5" } }, "sha512-6GGy0wxJ5aI3aubafrXUez3P5ohphR6LwIUthwW62LG/2ko0Y8/eK10UbUvqx/MJwpJhqTtf7NpueqKPgG4QkA=="],
+
+    "@softistx/ai-ollama": ["@softistx/ai-ollama@0.4.0", "", { "peerDependencies": { "@softistx/ai-core": "^0.8.0", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-b7jcuy8+yXoy0cMj04s9fQ5+7n50xeq4/xdW/rpAbflXzEDoOXLaDESdN7KcjeMcVQKAY2dnmWaob4+xh0X+EQ=="],
+
+    "@softistx/ai-testing": ["@softistx/ai-testing@0.3.3", "", { "peerDependencies": { "@softistx/ai-core": "^0.8.0", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-CyQqtgpQnKH+NI+82TG1dCytxjnsfo7BMSnUPmJwW2cS4IWuGZM4ktvfPUVznmyrUN9+2t3k6r8y+ZkDOGzqfw=="],
 
     "@softistx/alxia": ["@softistx/alxia@0.28.0", "", { "peerDependencies": { "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-mCeH9B14Bvu/H8zOGpEVZjlKs6Lsi1POUKruCD8O0EDo7ADOOy0+B0uZa28oMlbOxpUClqDndfY8KDLHS7/jrQ=="],
 

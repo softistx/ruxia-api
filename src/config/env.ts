@@ -144,6 +144,14 @@ export const env = defineEnv(
     // Required in production; unset elsewhere, nothing is throttled
     // (src/config/redis.ts).
     REDIS_URL: orUnset(redisUrl),
+    // OLLAMA_BASE_URL: the Ollama server (the owner's Mac, over Tailscale), e.g.
+    // http://100.64.0.2:11434. Unset, the health probe does not run and every
+    // Ollama model is unavailable (src/modules/models).
+    OLLAMA_BASE_URL: z
+      .string()
+      .transform((value) => value || undefined)
+      .pipe(z.url({ protocol: /^https?$/ }).optional())
+      .optional(),
     // S3_*: the S3-compatible store of member avatars and, later, attachments.
     // All optional: without S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY the
     // files are unavailable and nothing else changes.
