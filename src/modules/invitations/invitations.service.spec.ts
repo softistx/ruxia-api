@@ -8,6 +8,7 @@ import {
 } from "~/auth";
 import { sessionViewer } from "~/execute";
 import { appMongo } from "../../config/db";
+import { memberRenamer } from "../members";
 import { InvitationsService } from "./invitations.service";
 
 const refused = (code: string) => ({ extensions: { code } });
@@ -22,13 +23,19 @@ async function adminService(kit: AuthApp) {
     viewer,
     unlimited,
     () => kit.clock.now(),
+    memberRenamer(appMongo),
   );
   return { admin, service };
 }
 
 const anonymousService = (kit: AuthApp) =>
-  new InvitationsService(appMongo, kit.auth, null, unlimited, () =>
-    kit.clock.now(),
+  new InvitationsService(
+    appMongo,
+    kit.auth,
+    null,
+    unlimited,
+    () => kit.clock.now(),
+    memberRenamer(appMongo),
   );
 
 describe("InvitationsService", () => {

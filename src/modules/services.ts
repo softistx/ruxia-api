@@ -10,7 +10,7 @@ import {
   StepUpService,
 } from "./accounts";
 import { InvitationsService } from "./invitations";
-import { MembersService } from "./members";
+import { MembersService, memberRenamer } from "./members";
 import { ModelsService, oncePerMinute, type StatusStore } from "./models";
 import { loadedCatalogues, TranslationsService } from "./translations";
 
@@ -49,6 +49,7 @@ export function services(deps: {
       deps.viewer,
       limit,
       () => new Date(),
+      memberRenamer(appMongo),
     ),
     models: new ModelsService(appMongo, deps.statuses, (message) =>
       statusWarning("status", message),

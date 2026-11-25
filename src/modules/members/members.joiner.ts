@@ -16,3 +16,14 @@ export function memberJoiner(mongo: Pick<AppMongo, "as">) {
     );
   };
 }
+
+// The members' port for a name chosen after the member joined (an invitee
+// names themselves on accepting): `invitations` takes it explicitly, so only
+// this module writes `members`. The member is its own updater.
+export type MemberRenamer = (userId: string, name: string) => Promise<void>;
+
+export function memberRenamer(mongo: Pick<AppMongo, "as">): MemberRenamer {
+  return async (userId, name) => {
+    await mongo.as(userId).db.members.update(userId, { name });
+  };
+}

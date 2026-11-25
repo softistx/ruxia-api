@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { appMongo } from "../../config/db";
-import { memberJoiner } from "./members.joiner";
+import { memberJoiner, memberRenamer } from "./members.joiner";
 
 test("joining records the member by the account's id, lowercased and idempotent", async () => {
   const join = memberJoiner(appMongo);
@@ -20,5 +20,22 @@ test("joining records the member by the account's id, lowercased and idempotent"
     name: "Joiner Again",
     locale: "en",
     disabledAt: null,
+  });
+});
+
+test("renaming changes the name alone, stamped by the member", async () => {
+  const userId = Bun.randomUUIDv7();
+  await memberJoiner(appMongo)({
+    userId,
+    email: "rename@ruxia.test",
+    name: "Before",
+    locale: "fr",
+  });
+  await memberRenamer(appMongo)(userId, "After");
+  const row = await appMongo.db.members.findOne({ _id: userId });
+  expect(row).toMatchObject({
+    name: "After",
+    email: "rename@ruxia.test",
+    updatedBy: userId,
   });
 });

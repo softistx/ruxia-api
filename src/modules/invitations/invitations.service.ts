@@ -12,6 +12,7 @@ import {
   type SignInPayload,
   signedIn,
 } from "../accounts";
+import type { MemberRenamer } from "../members";
 import {
   alreadyMember,
   invalidCursor,
@@ -41,6 +42,8 @@ export class InvitationsService {
     private readonly viewer: Viewer | null,
     private readonly limit: ClientLimit,
     private readonly now: () => Date,
+    // The members module's write of a name (`memberRenamer`), never defaulted.
+    private readonly rename: MemberRenamer,
   ) {}
 
   private get actor() {
@@ -174,7 +177,7 @@ export class InvitationsService {
       }
       const users = this.auth.accounts.user;
       const user = await authCall(() => users.update(accepted.user, { name }));
-      await this.mongo.as(user.id).db.members.update(user.id, { name });
+      await this.rename(user.id, name);
       return signedIn(
         { ...accepted, user },
         await this.auth.roles.roleOf(user.id),
