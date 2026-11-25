@@ -1,7 +1,9 @@
+import { scryptHasher, systemClock } from "@softistx/janus";
 import { simpleWebAuthnVerifier } from "@softistx/janus-passkeys";
 import { type Auth, createAuth } from "../auth/auth";
 import { serverMailer } from "../mail/mailer";
 import { memberJoiner } from "../modules/members/members.joiner";
+import { background } from "../shared/background";
 import { appMongo, databaseOf } from "./db";
 import { env } from "./env";
 
@@ -22,6 +24,10 @@ export function serverAuth() {
         password: env.SMTP_PASSWORD,
         tlsServername: env.SMTP_TLS_SERVERNAME,
       }),
+      clock: systemClock,
+      hasher: scryptHasher(),
+      background: background(),
+      warn: (message) => console.warn(message),
       uiOrigin: env.UI_ORIGIN,
       mailFrom: env.MAIL_FROM,
       totpKeys: env.TOTP_KEYS,

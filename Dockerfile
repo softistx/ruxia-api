@@ -36,4 +36,8 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /sdl/src ./src
 USER bun
 EXPOSE 3000
+# The image has no curl: Bun's own fetch asks /health (it answers 503 while
+# Mongo does not), on the PORT the server listens on.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["bun", "--no-install", "-e", "const r = await fetch(`http://127.0.0.1:${process.env.PORT ?? 3000}/health`); process.exit(r.ok ? 0 : 1)"]
 CMD ["bun", "--no-install", "dist/server.js"]

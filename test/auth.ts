@@ -12,6 +12,7 @@ import { clientHeader } from "../src/http/csrf";
 import { type Throttle, unthrottled } from "../src/limits/throttle";
 import { memberJoiner } from "../src/modules/members/members.joiner";
 import { noStatuses, type StatusStore } from "../src/modules/models";
+import { background } from "../src/shared/background";
 
 export const uiOrigin = "https://ui.ruxia.test";
 
@@ -49,6 +50,8 @@ export function authApp(
     mailer,
     clock,
     hasher: scryptHasher({ cost: 10 }),
+    background: background(),
+    warn: (message) => console.warn(message),
     totpKeys: env.TOTP_KEYS,
     uiOrigin,
     mailFrom: "noreply@ruxia.test",

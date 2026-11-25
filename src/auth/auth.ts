@@ -1,20 +1,16 @@
-import {
-  type Clock,
-  type MailConfig,
-  type PasskeysConfig,
-  type PasswordHasher,
-  systemClock,
+import type {
+  Clock,
+  MailConfig,
+  PasskeysConfig,
+  PasswordHasher,
 } from "@softistx/janus";
 import { janusMail } from "@softistx/janus-mail";
-import {
-  createMongoAdapter,
-  createMongoInvitations,
-} from "@softistx/janus-mongo";
+import { createMongoAdapter } from "@softistx/janus-mongo";
 import type { Mailer } from "@softistx/mail";
 import type { Db } from "mongodb";
-import { type Background, background } from "../shared/background";
-import { isRole } from "./access";
+import type { Background } from "../shared/background";
 import { createAccounts, platformPermissions } from "./auth-accounts";
+import { invitationsConfig } from "./auth-invitations";
 import { securityNotices } from "./auth-notices";
 import { platformRoles } from "./roles";
 
@@ -43,10 +39,11 @@ export interface AuthOptions {
     Partial<Pick<PasskeysConfig, "rpId" | "rpName" | "origins">>;
   // Records the member of a freshly accepted invitation.
   onJoined: (joined: Joined) => Promise<void>;
-  // `fixedClock()` in tests: sessions and links expire by it.
-  clock?: Clock;
-  // scrypt at OWASP's cost by default; a test passes a cheap one.
-  hasher?: PasswordHasher;
+  // `systemClock` in the server, `fixedClock()` in tests: sessions and links
+  // expire by it.
+  clock: Clock;
+  // `scryptHasher()` (OWASP's cost) in the server; a test passes a cheap one.
+  hasher: PasswordHasher;
   // The keys that seal the accounts' TOTP secrets (env.TOTP_KEYS): the first
   // seals, every one opens.
   totpKeys: readonly [
@@ -56,8 +53,10 @@ export interface AuthOptions {
   // janus's mail throttle (5 requests per 10 minutes by default); a spec
   // that is not about it passes `{ throttle: false }`.
   mail?: MailConfig;
+  // Where a role it cannot read is reported (`console.warn` in the server).
+  warn: (message: string) => void;
   // Where the mails nobody waits for are sent from.
-  background?: Background;
+  background: Background;
 }
 
 // The brand colour of the mails (the UI theme's light `--primary`, as
@@ -90,7 +89,7 @@ export function mailLinks(uiOrigin: string) {
 // janus, wired for ruxia: one account type, sessions, invitations, passkeys
 // and the mails over `options.mailer`.
 export function createAuth(options: AuthOptions) {
-  const clock = options.clock ?? systemClock;
+  const { clock } = options;
   const store = createMongoAdapter(options.db);
   const links = mailLinks(options.uiOrigin);
   const from = { name: "ruxia", address: options.mailFrom };
@@ -122,40 +121,14 @@ export function createAuth(options: AuthOptions) {
       origins: [options.uiOrigin],
       ...options.passkeys,
     },
-    invitations: {
-      store: createMongoInvitations(options.db),
-      lifetime: "7d",
-      maxPending: 200,
-      create: (invitation) => ({
-        email: invitation.email,
-        name: invitation.name,
-        ...(invitation.locale === "en" || invitation.locale === "fr"
-          ? { locale: invitation.locale }
-          : {}),
-      }),
-      // The role comes from the invitation, granted as the account is made.
-      onAccepted: async ({ invitation, user }) => {
-        if (!isRole(invitation.role)) {
-          throw new TypeError(
-            `invitation role "${invitation.role}" is unknown`,
-          );
-        }
-        await roles.setRole(user.id, invitation.role);
-        await options.onJoined({
-          userId: user.id,
-          email: invitation.email,
-          name: invitation.name,
-          locale: invitation.locale === "en" ? "en" : "fr",
-        });
-      },
-    },
+    invitations: invitationsConfig(options.db, options.onJoined, () => roles),
     ...(options.mail && { mail: options.mail }),
   });
 
   const roles = platformRoles(
     platformPermissions(accounts, store.relations),
     store.relations,
-    { db: options.db },
+    { db: options.db, warn: options.warn },
   );
 
   return {
@@ -167,7 +140,7 @@ export function createAuth(options: AuthOptions) {
     from,
     links,
     clock,
-    background: options.background ?? background(),
+    background: options.background,
   };
 }
 

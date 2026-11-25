@@ -57,14 +57,14 @@ export interface PlatformRoles {
 export function platformRoles(
   permissions: Permissions,
   relations: Relations,
-  options: { db: Db; warn?: (message: string) => void },
+  options: { db: Db; warn: (message: string) => void },
 ): PlatformRoles {
   const ctx: RolesContext = {
     permissions,
     relations,
     db: options.db,
     locks: getCollection(options.db, roleLocks).raw,
-    warn: options.warn ?? ((message) => console.warn(message)),
+    warn: options.warn,
   };
   return {
     rolesOf: (accountId) => rolesOf(ctx, accountId),
