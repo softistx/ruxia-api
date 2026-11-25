@@ -5,7 +5,6 @@ import {
   type MailConfig,
   type PasskeysConfig,
   type PasswordHasher,
-  scryptHasher,
   type UserEvent,
 } from "@softistx/janus";
 import { defineModel, permissions } from "@softistx/janus/permissions";
@@ -32,7 +31,7 @@ export interface AccountsOptions {
   invitations: InvitationsConfig;
   passkeys: PasskeysConfig;
   clock: Clock;
-  hasher: PasswordHasher | undefined;
+  hasher: PasswordHasher;
   totpKeys: readonly [
     { id: string; key: string },
     ...{ id: string; key: string }[],
@@ -59,7 +58,7 @@ export function createAccounts(options: AccountsOptions) {
     },
     store: options.store.store,
     relations: options.store.relations,
-    hasher: options.hasher ?? scryptHasher(),
+    hasher: options.hasher,
     clock: options.clock,
     secondFactor: { issuer: "ruxia", keys: options.totpKeys },
     passkeys: { ...options.passkeys, firstFactor: true },

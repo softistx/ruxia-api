@@ -72,3 +72,5 @@ inventory is `src/i18n/codes.ts`.
 | `models.errors.offline`              | Sending to an Ollama model whose server is off or lacks it (409: a state refusal the UI shows as an offline model, never an outage to retry). |
 | `operator.errors.invalid-arguments`  | An operator script run with wrong arguments.                                                                                                  |
 | `validation.errors.*`                | An input refused: `invalid-input` and each field's reason; the query limits.                                                                  |
+
+The `validation.errors.*` wildcard row is deliberate, not a shortcut: those codes come from `@softistx/graphql-validation`, which owns the list, so this table does not copy it.
