@@ -15,6 +15,8 @@ const exceptions = new Set([
   "src/migrations/2026-11-25-baseline-texts.migration.ts",
   "src/migrations/2026-11-25-auth-errors.migration.ts",
   "src/migrations/2026-11-25-members-errors.migration.ts",
+  "src/migrations/2026-11-25-models-errors.migration.ts",
+  "src/migrations/2026-11-25-models-seed.migration.ts",
 ]);
 
 const sources = async () => {

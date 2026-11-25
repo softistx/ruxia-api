@@ -1,5 +1,6 @@
 import { codes as invitations } from "../modules/invitations/invitations.errors";
 import { codes as members } from "../modules/members/members.errors";
+import { codes as models } from "../modules/models/models.errors";
 import { codes as operator } from "../scripts/operator.errors";
 import { defineCodes } from "./define-codes";
 
@@ -46,6 +47,7 @@ export const errorCodes = [
   ...auth,
   ...invitations,
   ...members,
+  ...models,
   ...operator,
   ...validation,
 ] as const;

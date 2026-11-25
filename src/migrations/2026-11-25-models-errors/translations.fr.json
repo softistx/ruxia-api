@@ -1,0 +1,5 @@
+{
+  "models.errors.not-found": "Ce modèle n'existe pas.",
+  "models.errors.disabled": "Le modèle {label} est désactivé : demandez à un administrateur de l'activer, ou choisissez un autre modèle.",
+  "models.errors.offline": "Le modèle {label} est hors ligne pour le moment : choisissez un autre modèle ou réessayez plus tard."
+}

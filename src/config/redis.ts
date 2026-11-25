@@ -3,6 +3,11 @@ import { RedisClient } from "bun";
 import * as caches from "../limits/caches";
 import * as limits from "../limits/limits";
 import { redisThrottle, type Throttle, unthrottled } from "../limits/throttle";
+import {
+  noStatuses,
+  redisStatuses,
+  type StatusStore,
+} from "../modules/models/models.status";
 import { env } from "./env";
 
 // The app's Redis, for the rate limits, at `uri`. It never waits for Redis:
@@ -56,3 +61,8 @@ export const serverThrottle: Throttle =
         log: (message) => console.warn(message),
         now: () => Date.now(),
       });
+
+// Where the Ollama probe's answer is kept: Redis, or nowhere (every Ollama
+// model then reads unavailable).
+export const serverStatuses: StatusStore =
+  redis === undefined ? noStatuses : redisStatuses(redis.cache.models);

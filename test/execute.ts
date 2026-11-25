@@ -3,6 +3,7 @@ import { execute } from "graphql";
 import { janusViewer, type Viewer } from "../src/auth/viewer";
 import { schema } from "../src/http/schema";
 import { unthrottled } from "../src/limits/throttle";
+import { noStatuses } from "../src/modules/models";
 import { services } from "../src/modules/services";
 import type { AuthApp } from "./auth";
 
@@ -27,6 +28,7 @@ export async function executeAs<D, V extends Record<string, unknown>>(
         viewer,
         throttle: unthrottled,
         clientIp: undefined,
+        statuses: noStatuses,
       }),
     },
   });

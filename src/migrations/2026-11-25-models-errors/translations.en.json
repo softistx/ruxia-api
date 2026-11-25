@@ -1,0 +1,5 @@
+{
+  "models.errors.not-found": "This model does not exist.",
+  "models.errors.disabled": "The model {label} is disabled: ask an administrator to enable it, or pick another model.",
+  "models.errors.offline": "The model {label} is offline right now: pick another model or try again later."
+}
