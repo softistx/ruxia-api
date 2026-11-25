@@ -6,6 +6,7 @@ import { unthrottled } from "../src/limits/throttle";
 import { noStatuses } from "../src/modules/models";
 import { services } from "../src/modules/services";
 import type { AuthApp } from "./auth";
+import { fakeAdapters } from "./conversations";
 
 // Runs an operation in process, as `viewer`, with the resolvers of /graphql
 // and no HTTP in between.
@@ -29,6 +30,9 @@ export async function executeAs<D, V extends Record<string, unknown>>(
         throttle: unthrottled,
         clientIp: undefined,
         statuses: noStatuses,
+        adapters: fakeAdapters(),
+        titleModelId: "claude-haiku-5-5",
+        now: () => new Date(),
       }),
     },
   });

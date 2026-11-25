@@ -152,6 +152,18 @@ export const env = defineEnv(
       .transform((value) => value || undefined)
       .pipe(z.url({ protocol: /^https?$/ }).optional())
       .optional(),
+    // ANTHROPIC_API_KEY: the key Claude models are called with. Optional:
+    // unset, a send to a Claude model fails with a model error, nothing else
+    // changes (src/modules/conversations).
+    ANTHROPIC_API_KEY: unsetIfEmpty,
+    // TITLE_MODEL_ID: the cheap model that names a conversation after its first
+    // exchange; when it is not enabled or not available, the conversation's
+    // own model does.
+    TITLE_MODEL_ID: z
+      .string()
+      .max(200)
+      .default("")
+      .transform((value) => value || "claude-haiku-5-5"),
     // S3_*: the S3-compatible store of member avatars and, later, attachments.
     // All optional: without S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY the
     // files are unavailable and nothing else changes.
@@ -173,7 +185,7 @@ export const env = defineEnv(
     PORT: z.coerce.number().default(3000),
   },
   {
-    secret: ["MAIL_URL", "SMTP_PASSWORD", "S3_SECRET_KEY"],
+    secret: ["MAIL_URL", "SMTP_PASSWORD", "S3_SECRET_KEY", "ANTHROPIC_API_KEY"],
   },
 );
 

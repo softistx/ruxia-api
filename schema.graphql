@@ -131,6 +131,78 @@ scalar CIDRv4 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4632")
 """An IPv6 block in CIDR notation, such as 2001:db8::/32."""
 scalar CIDRv6 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4291")
 
+"""
+A conversation between the signed-in member and a persona (spec 4.4). Only its
+owner reads it: another member gets `conversations.errors.not-found`, and so
+does the admin. A conversation nobody has written in yet is not listed.
+"""
+type Conversation {
+  """The last message of the branch shown; null while nothing was said."""
+  activeLeafId: ID
+  """
+  The id of the answer being written (the assistant message's id); null while idle.
+  """
+  activeRunId: ID
+  """When it was created."""
+  createdAt: DateTime!
+  """The conversation's id."""
+  id: ID!
+  """When the last message was written."""
+  lastMessageAt: DateTime!
+  """
+  The messages of the branch shown, newest first, from its leaf up to the
+  first message. 400 `conversations.errors.invalid-cursor` for a cursor that
+  does not belong to this branch.
+  """
+  messages(
+    """The `endCursor` of the previous page."""
+    after: String @constraint(maxLength: 500)
+    """How many messages to read."""
+    first: Int = 50 @constraint(min: 1, max: 200)
+  ): MessageConnection!
+  """The model the next message goes to."""
+  modelId: String!
+  """
+  The persona itself while the member may still read it (deleted ones too);
+  null once it is PRIVATE and someone else's. `personaSnapshot` always shows.
+  """
+  persona: Persona
+  """The persona it was started with."""
+  personaId: ID!
+  """The persona's name and avatar when the conversation started."""
+  personaSnapshot: PersonaSnapshot!
+  """A short title written after the first exchange; null until then."""
+  title: String
+  """When it last changed."""
+  updatedAt: DateTime!
+  """
+  Send it back as `version` where an update asks for it: a stale one is refused.
+  """
+  version: Int!
+}
+
+"""A page of conversations."""
+type ConversationConnection {
+  """The conversations of the page."""
+  edges: [ConversationEdge!]!
+  """Where the page stands."""
+  pageInfo: PageInfo!
+  """How many conversations there are in all."""
+  totalCount: Int!
+}
+
+"""One conversation of a page."""
+type ConversationEdge {
+  """The conversation."""
+  node: Conversation!
+}
+
+"""What `conversations` narrows to."""
+input ConversationFilter {
+  """Only the conversations held with this persona."""
+  personaId: ID @constraint(maxLength: 64)
+}
+
 """An ISO 3166-1 alpha-2 country code, such as FR."""
 scalar CountryCode @specifiedBy(url: "https://www.iso.org/iso-3166-country-codes.html")
 
@@ -457,6 +529,96 @@ input MemberSettingsInput {
 }
 
 """
+A message of a conversation's tree (spec 4.5): `parentId` is the message it
+follows, so a conversation branches where a message has several children.
+"""
+type Message {
+  """The conversation it belongs to."""
+  conversationId: ID!
+  """What it cost, in US dollars; null when unknown."""
+  cost: Float
+  """When it was written."""
+  createdAt: DateTime!
+  """Why it failed, when FAILED."""
+  errorCode: String
+  """The message's id."""
+  id: ID!
+  """The model that wrote it; null for a member's message."""
+  modelId: String
+  """The message it follows; null for the first one."""
+  parentId: ID
+  """Its parts, in order."""
+  parts: [MessagePart!]!
+  """Who wrote it."""
+  role: MessageRole!
+  """The id of its run, set only while it is STREAMING."""
+  runId: ID
+  """Where it stands."""
+  status: MessageStatus!
+  """Its text parts, joined."""
+  text: String!
+  """What it consumed; null for a member's message and while streaming."""
+  usage: Usage
+}
+
+"""A page of messages."""
+type MessageConnection {
+  """The messages of the page."""
+  edges: [MessageEdge!]!
+  """Where the page stands."""
+  pageInfo: PageInfo!
+  """How many messages the branch holds in all."""
+  totalCount: Int!
+}
+
+"""One message of a page."""
+type MessageEdge {
+  """The message."""
+  node: Message!
+}
+
+"""
+A part of a message, in order. Tool calls and results are not shown yet.
+"""
+union MessagePart = MessageTextPart | MessageThinkingPart
+
+"""Who wrote a message."""
+enum MessageRole {
+  """The persona's model."""
+  ASSISTANT
+  """The member."""
+  USER
+}
+
+"""Where a message stands."""
+enum MessageStatus {
+  """Complete."""
+  DONE
+  """
+  The run failed; `errorCode` says why and the parts are what was written before.
+  """
+  FAILED
+  """The member stopped it; the parts are what was written before."""
+  STOPPED
+  """The answer is being written: its parts so far are partial."""
+  STREAMING
+}
+
+"""A piece of plain text of a message."""
+type MessageTextPart {
+  """The text."""
+  text: String!
+}
+
+"""
+The model's reasoning, as far as the provider shows it (its signature is never exposed).
+"""
+type MessageThinkingPart {
+  """The reasoning."""
+  text: String!
+}
+
+"""
 A model a conversation may pick (spec 2). Claude models are seeded; Ollama
 models are found by a probe and stay disabled until an administrator enables
 them.
@@ -755,6 +917,17 @@ type Mutation {
     id: ID! @constraint(maxLength: 64)
   ): Invitation!
   """
+  Changes the model of one of the member's conversations. 404
+  `conversations.errors.not-found`, 409 `conversations.errors.model-unavailable`
+  (field `modelId`) for a model that is unknown or not enabled.
+  """
+  setConversationModel(
+    """The conversation's id."""
+    id: ID! @constraint(maxLength: 64)
+    """The model the next message goes to."""
+    modelId: String! @constraint(minLength: 1, maxLength: 200)
+  ): Conversation!
+  """
   Gives a member its one role. The last administrator cannot be demoted: 409
   `members.errors.last-admin`. Administrators only.
   """
@@ -811,6 +984,16 @@ type Mutation {
   ): SignInPayload!
   """Revokes the request's session. False when it presented none."""
   signOut: Boolean!
+  """
+  Starts an empty conversation with a persona the member may read. 404
+  `personas.errors.not-found` for an unknown one or someone else's PRIVATE one,
+  409 `conversations.errors.model-unavailable` (field `modelId`) for a model that
+  is unknown or not enabled (an offline Ollama model is accepted).
+  """
+  startConversation(
+    """The persona and the model."""
+    input: StartConversationInput!
+  ): Conversation!
   """Changes the signed-in member's own settings and answers them."""
   updateMemberSettings(
     """The settings to change."""
@@ -1001,6 +1184,18 @@ type PersonaOwner {
   name: String!
 }
 
+"""
+What a conversation kept of its persona when it started, so it stays readable once the persona is renamed or deleted.
+"""
+type PersonaSnapshot {
+  """
+  The persona's avatar key then (never a URL): the UI shows it at `/media/persona-avatars/<key>/256`.
+  """
+  avatarKey: String
+  """The persona's name then."""
+  name: String!
+}
+
 """What a persona may use in a conversation."""
 type PersonaTools {
   """Whether it may produce artifacts."""
@@ -1069,6 +1264,28 @@ type Query {
     """Page size, 1 to 100."""
     first: Int = 20 @constraint(min: 1, max: 100)
   ): PersonaConnection!
+  """
+  One of the member's conversations. 404 `conversations.errors.not-found` for
+  an unknown one, another member's, or a malformed id (the admin's reads
+  nothing of the members').
+  """
+  conversation(
+    """The conversation's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Conversation!
+  """
+  The signed-in member's conversations, most recently written first, with the
+  empty ones left out. 400 `conversations.errors.invalid-cursor` for a cursor
+  of another list.
+  """
+  conversations(
+    """The `endCursor` of the previous page."""
+    after: String @constraint(maxLength: 500)
+    """What to narrow to."""
+    filter: ConversationFilter
+    """How many conversations to read."""
+    first: Int = 20 @constraint(min: 1, max: 100)
+  ): ConversationConnection!
   """
   Every API error message in a language (the request's language when none is
   given: `Accept-Language`, then `lang`, then the cookie, else French). Public:
@@ -1272,6 +1489,14 @@ enum SortDirection {
   DESC
 }
 
+"""The conversation to start."""
+input StartConversationInput {
+  """The model to start on; the persona's default model when left out."""
+  modelId: String @constraint(minLength: 1, maxLength: 200)
+  """The persona to talk to: the member's own or a TEAM one."""
+  personaId: ID! @constraint(maxLength: 64)
+}
+
 """
 A step-up under way: keep `challenge` (never in a URL) and post it to confirmStepUp with the code.
 """
@@ -1352,6 +1577,20 @@ input UpdatePersonaInput {
   visibility: PersonaVisibility
   """The voice it speaks with; null clears it."""
   voiceId: String @constraint(maxLength: 100)
+}
+
+"""What a model call consumed."""
+type Usage {
+  """Of the input, those read from the prompt cache."""
+  cacheReadTokens: Int!
+  """Of the input, those written to the prompt cache."""
+  cacheWriteTokens: Int!
+  """All input tokens, the cached ones included."""
+  inputTokens: Int!
+  """Output tokens."""
+  outputTokens: Int!
+  """Web searches the model ran."""
+  webSearches: Int!
 }
 
 """A UTC offset from -12:00 to +14:00, such as +05:30."""

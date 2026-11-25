@@ -48,3 +48,13 @@ export const mediaUploads = defineRateLimit({
   per: hour,
   burst: 10,
 });
+
+// What a member may send to a conversation: per account, counted before a run
+// starts (30 a minute, a burst of 10).
+export const messageSends = defineRateLimit({
+  name: "message-sends",
+  key: (p: ViewerParams) => p.viewerId,
+  limit: 30,
+  per: minute,
+  burst: 10,
+});

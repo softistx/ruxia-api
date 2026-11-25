@@ -1,0 +1,134 @@
+"What a conversation kept of its persona when it started, so it stays readable once the persona is renamed or deleted."
+type PersonaSnapshot {
+  "The persona's name then."
+  name: String!
+  "The persona's avatar key then (never a URL): the UI shows it at `/media/persona-avatars/<key>/256`."
+  avatarKey: String
+}
+
+"""
+A conversation between the signed-in member and a persona (spec 4.4). Only its
+owner reads it: another member gets `conversations.errors.not-found`, and so
+does the admin. A conversation nobody has written in yet is not listed.
+"""
+type Conversation {
+  "The conversation's id."
+  id: ID!
+  "The persona it was started with."
+  personaId: ID!
+  """
+  The persona itself while the member may still read it (deleted ones too);
+  null once it is PRIVATE and someone else's. `personaSnapshot` always shows.
+  """
+  persona: Persona
+  "The persona's name and avatar when the conversation started."
+  personaSnapshot: PersonaSnapshot!
+  "The model the next message goes to."
+  modelId: String!
+  "A short title written after the first exchange; null until then."
+  title: String
+  "When the last message was written."
+  lastMessageAt: DateTime!
+  "The last message of the branch shown; null while nothing was said."
+  activeLeafId: ID
+  "The id of the answer being written (the assistant message's id); null while idle."
+  activeRunId: ID
+  """
+  The messages of the branch shown, newest first, from its leaf up to the
+  first message. 400 `conversations.errors.invalid-cursor` for a cursor that
+  does not belong to this branch.
+  """
+  messages(
+    "How many messages to read."
+    first: Int = 50 @constraint(min: 1, max: 200)
+    "The `endCursor` of the previous page."
+    after: String @constraint(maxLength: 500)
+  ): MessageConnection!
+  "When it was created."
+  createdAt: DateTime!
+  "When it last changed."
+  updatedAt: DateTime!
+  "Send it back as `version` where an update asks for it: a stale one is refused."
+  version: Int!
+}
+
+"One conversation of a page."
+type ConversationEdge {
+  "The conversation."
+  node: Conversation!
+}
+
+"A page of conversations."
+type ConversationConnection {
+  "The conversations of the page."
+  edges: [ConversationEdge!]!
+  "Where the page stands."
+  pageInfo: PageInfo!
+  "How many conversations there are in all."
+  totalCount: Int!
+}
+
+"What `conversations` narrows to."
+input ConversationFilter {
+  "Only the conversations held with this persona."
+  personaId: ID @constraint(maxLength: 64)
+}
+
+"The conversation to start."
+input StartConversationInput {
+  "The persona to talk to: the member's own or a TEAM one."
+  personaId: ID! @constraint(maxLength: 64)
+  "The model to start on; the persona's default model when left out."
+  modelId: String @constraint(minLength: 1, maxLength: 200)
+}
+
+extend type Query {
+  """
+  The signed-in member's conversations, most recently written first, with the
+  empty ones left out. 400 `conversations.errors.invalid-cursor` for a cursor
+  of another list.
+  """
+  conversations(
+    "How many conversations to read."
+    first: Int = 20 @constraint(min: 1, max: 100)
+    "The `endCursor` of the previous page."
+    after: String @constraint(maxLength: 500)
+    "What to narrow to."
+    filter: ConversationFilter
+  ): ConversationConnection!
+
+  """
+  One of the member's conversations. 404 `conversations.errors.not-found` for
+  an unknown one, another member's, or a malformed id (the admin's reads
+  nothing of the members').
+  """
+  conversation(
+    "The conversation's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Conversation!
+}
+
+extend type Mutation {
+  """
+  Starts an empty conversation with a persona the member may read. 404
+  `personas.errors.not-found` for an unknown one or someone else's PRIVATE one,
+  409 `conversations.errors.model-unavailable` (field `modelId`) for a model that
+  is unknown or not enabled (an offline Ollama model is accepted).
+  """
+  startConversation(
+    "The persona and the model."
+    input: StartConversationInput!
+  ): Conversation!
+
+  """
+  Changes the model of one of the member's conversations. 404
+  `conversations.errors.not-found`, 409 `conversations.errors.model-unavailable`
+  (field `modelId`) for a model that is unknown or not enabled.
+  """
+  setConversationModel(
+    "The conversation's id."
+    id: ID! @constraint(maxLength: 64)
+    "The model the next message goes to."
+    modelId: String! @constraint(minLength: 1, maxLength: 200)
+  ): Conversation!
+}

@@ -24,4 +24,5 @@ the server runs (such as `models.probe.ts`) are the `reload` role under another 
 - **AI through `@softistx/ai-*` only**: no provider SDK, no hand-made SSE writer, no
   app-side embeddings or search client. A gap is filed on softistx/ai and the slice waits.
 - **Writes by a model are proposed actions** confirmed by the user (MCP, memory).
+- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now` and `titleModelId`; no module defaults a port.
 - **CI**: no workflow yet; the local green bar is the proof until one is added.

@@ -1,0 +1,97 @@
+"Who wrote a message."
+enum MessageRole {
+  "The member."
+  USER
+  "The persona's model."
+  ASSISTANT
+}
+
+"Where a message stands."
+enum MessageStatus {
+  "The answer is being written: its parts so far are partial."
+  STREAMING
+  "Complete."
+  DONE
+  "The run failed; `errorCode` says why and the parts are what was written before."
+  FAILED
+  "The member stopped it; the parts are what was written before."
+  STOPPED
+}
+
+"What a model call consumed."
+type Usage {
+  "All input tokens, the cached ones included."
+  inputTokens: Int!
+  "Output tokens."
+  outputTokens: Int!
+  "Of the input, those read from the prompt cache."
+  cacheReadTokens: Int!
+  "Of the input, those written to the prompt cache."
+  cacheWriteTokens: Int!
+  "Web searches the model ran."
+  webSearches: Int!
+}
+
+"A piece of plain text of a message."
+type MessageTextPart {
+  "The text."
+  text: String!
+}
+
+"The model's reasoning, as far as the provider shows it (its signature is never exposed)."
+type MessageThinkingPart {
+  "The reasoning."
+  text: String!
+}
+
+"A part of a message, in order. Tool calls and results are not shown yet."
+union MessagePart = MessageTextPart | MessageThinkingPart
+
+"""
+A message of a conversation's tree (spec 4.5): `parentId` is the message it
+follows, so a conversation branches where a message has several children.
+"""
+type Message {
+  "The message's id."
+  id: ID!
+  "The conversation it belongs to."
+  conversationId: ID!
+  "The message it follows; null for the first one."
+  parentId: ID
+  "Who wrote it."
+  role: MessageRole!
+  "Its text parts, joined."
+  text: String!
+  "Its parts, in order."
+  parts: [MessagePart!]!
+  "The model that wrote it; null for a member's message."
+  modelId: String
+  "Where it stands."
+  status: MessageStatus!
+  "The id of its run, set only while it is STREAMING."
+  runId: ID
+  "What it consumed; null for a member's message and while streaming."
+  usage: Usage
+  "What it cost, in US dollars; null when unknown."
+  cost: Float
+  "Why it failed, when FAILED."
+  errorCode: String
+  "When it was written."
+  createdAt: DateTime!
+}
+
+"One message of a page."
+type MessageEdge {
+  "The message."
+  node: Message!
+}
+
+"A page of messages."
+type MessageConnection {
+  "The messages of the page."
+  edges: [MessageEdge!]!
+  "Where the page stands."
+  pageInfo: PageInfo!
+  "How many messages the branch holds in all."
+  totalCount: Int!
+}

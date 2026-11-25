@@ -8,6 +8,8 @@
         "@graphql-tools/load-files": "^8.0.9",
         "@graphql-tools/merge": "^10.0.9",
         "@softistx/ai-anthropic": "^0.5.0",
+        "@softistx/ai-core": "^0.8.0",
+        "@softistx/ai-memory": "^0.6.3",
         "@softistx/ai-ollama": "^0.4.0",
         "@softistx/alxia": "^0.28.0",
         "@softistx/alxia-env": "^0.6.0",
@@ -46,7 +48,6 @@
         "@graphql-codegen/typescript-resolvers": "7.0.1",
         "@graphql-tools/utils": "^13.2.2",
         "@graphql-typed-document-node/core": "^3.2.0",
-        "@softistx/ai-core": "^0.8.0",
         "@softistx/ai-testing": "^0.3.3",
         "@softistx/graphql-codegen-zod": "^0.6.0",
         "@types/bun": "^1.4.5",
@@ -293,6 +294,8 @@
     "@softistx/ai-anthropic": ["@softistx/ai-anthropic@0.5.0", "", { "peerDependencies": { "@softistx/ai-core": "^0.8.0", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-oh7ePokGVSzvxqUF9rHk2AeUp3Z8MfiSjJQyv1DZ1DrI4M8roOWMrVq9AbPrfZBHOFmFRSjtAsrQ8I5UwSVwBA=="],
 
     "@softistx/ai-core": ["@softistx/ai-core@0.8.0", "", { "peerDependencies": { "typescript": "^6.0.3 || ^7.0.0", "zod": ">=4.6.5 <5" } }, "sha512-6GGy0wxJ5aI3aubafrXUez3P5ohphR6LwIUthwW62LG/2ko0Y8/eK10UbUvqx/MJwpJhqTtf7NpueqKPgG4QkA=="],
+
+    "@softistx/ai-memory": ["@softistx/ai-memory@0.6.3", "", { "peerDependencies": { "@softistx/ai-core": "^0.8.0", "typescript": "^6.0.3 || ^7.0.0", "zod": ">=4.6.5 <5" } }, "sha512-FCryM3Odr3AfdfxpPYmqETjc+o2Ke1DSp6q0EZTNIys4Q2fwAidsyZooSMpWFiCakgKlfj6eKFPIsyJC7OGhuQ=="],
 
     "@softistx/ai-ollama": ["@softistx/ai-ollama@0.4.0", "", { "peerDependencies": { "@softistx/ai-core": "^0.8.0", "typescript": "^6.0.3 || ^7.0.0" } }, "sha512-b7jcuy8+yXoy0cMj04s9fQ5+7n50xeq4/xdW/rpAbflXzEDoOXLaDESdN7KcjeMcVQKAY2dnmWaob4+xh0X+EQ=="],
 
