@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { AnyBulkWriteOperation, Document, Filter } from "mongodb";
 import { ObjectId } from "mongodb";
 import { EMBEDDING_DIMENSIONS } from "./models";
@@ -185,9 +186,12 @@ export interface SearchIndexes {
 
 // Whether the index a server holds has the definition we want (its fields, in
 // order).
+// The server may return the keys in another order, so the comparison ignores it.
 const sameDefinition = (held: unknown) =>
-  JSON.stringify((held as { fields?: unknown } | undefined)?.fields) ===
-  JSON.stringify(vectorIndexDefinition.definition.fields);
+  isDeepStrictEqual(
+    (held as { fields?: unknown } | undefined)?.fields,
+    vectorIndexDefinition.definition.fields,
+  );
 
 // Makes the vector index what `vectorIndexDefinition` says: created when it is
 // not there, updated when its definition differs, left alone otherwise.

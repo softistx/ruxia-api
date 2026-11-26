@@ -164,6 +164,45 @@ describe("DocumentsService", () => {
     ).toBe(1);
   });
 
+  test("chunks that cannot be removed are logged, and the file still goes", async () => {
+    const warnings: string[] = [];
+    const bucket = memoryBucket();
+    const ada = await memberOf(kit, { media: bucket.bucket });
+    const project = await ada.projects.create({ name: "P" });
+    const document = await uploadDocument(
+      kit,
+      bucket.bucket,
+      ada.id,
+      String(project._id),
+      { text: "x" },
+    );
+    const service = new DocumentsService(
+      appMongo,
+      ada.projects,
+      bucket.bucket,
+      {
+        remove: async () => {
+          throw new Error("mongot down");
+        },
+      },
+      kit.projects.queue,
+      ada.viewer,
+      (m) => warnings.push(m),
+    );
+    expect(await service.delete(String(document._id))).toBe(
+      String(document._id),
+    );
+    expect(warnings).toEqual(["document chunks not removed: Error"]);
+    expect(bucket.objects.has(projectDocumentPlace(document.key).key)).toBe(
+      false,
+    );
+    expect(
+      await appMongo.db.projectDocuments.raw.countDocuments({
+        _id: document._id,
+      }),
+    ).toBe(0);
+  });
+
   test("a file that cannot be removed is logged, and the record still goes", async () => {
     const warnings: string[] = [];
     const bucket = memoryBucket();

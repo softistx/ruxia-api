@@ -31,6 +31,13 @@ export interface IndexerPorts {
   log: (message: string) => void;
 }
 
+// Whether the queue aborted the run because it closed or lost the lease (the
+// job then runs again), not because it timed out.
+const isRequeued = (reason: unknown) => {
+  const code = (reason as { code?: string } | undefined)?.code;
+  return code === "CLOSED" || code === "LEASE_LOST";
+};
+
 // What the document's `errorCode` says of a failure that is retried until the
 // attempts are spent.
 const codeOf = (error: unknown) =>
@@ -59,9 +66,9 @@ export class DocumentIndexer {
     try {
       await this.index(documentId, signal);
     } catch (error) {
-      // A shutdown (or the queue's timeout) is not a failure of the document:
-      // the job goes back to the queue when its lease ends.
-      if (signal.aborted) throw error;
+      // A shutdown or a lost lease is not a failure of the document: the job
+      // goes back to the queue. A timeout is an ordinary failure.
+      if (signal.aborted && isRequeued(signal.reason)) throw error;
       const final =
         error instanceof IndexingFailure || attempt.number >= attempt.of;
       this.ports.log(`indexing attempt ${attempt.number}: ${codeOf(error)}`);

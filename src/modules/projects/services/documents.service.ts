@@ -76,10 +76,14 @@ export class DocumentsService {
   async delete(id: string) {
     const document = await this.find(id);
     await this.documents.raw.deleteOne({ _id: document._id });
-    await this.vectors.remove({
-      ownerId: this.actor,
-      documentId: String(document._id),
-    });
+    try {
+      await this.vectors.remove({
+        ownerId: this.actor,
+        documentId: String(document._id),
+      });
+    } catch (error) {
+      this.warn(`document chunks not removed: ${(error as Error).name}`);
+    }
     try {
       await this.files.delete(projectDocumentPlace(document.key));
     } catch (error) {

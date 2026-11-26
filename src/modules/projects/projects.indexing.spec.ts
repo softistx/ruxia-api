@@ -186,20 +186,44 @@ describe("DocumentIndexer", () => {
     expect(vectors.all()).toEqual([]);
   });
 
-  test("a shutdown is not a failure of the document: the job goes back to the queue", async () => {
+  // A run whose queue aborts it with `code` as the reason, as the SDK does.
+  async function abortedBy(code: string, attempt: typeof last) {
     const { bucket, kit, id, state } = await setup();
     const controller = new AbortController();
     const embedder = {
       async embed(): Promise<number[][]> {
-        controller.abort();
+        controller.abort(Object.assign(new Error(code), { code }));
         throw new Error("aborted");
       },
     };
     const indexer = indexerOf({ ...kit.projects, embedder }, bucket.bucket);
-    await expect(indexer.run(id, last, controller.signal)).rejects.toThrow(
-      "aborted",
-    );
-    expect(await state()).toMatchObject({ status: "pending", errorCode: null });
+    const run = indexer.run(id, attempt, controller.signal);
+    return { run, state };
+  }
+
+  test("a shutdown or a lost lease is not a failure of the document: the job goes back to the queue", async () => {
+    for (const code of ["CLOSED", "LEASE_LOST"]) {
+      for (const attempt of [once, last]) {
+        const { run, state } = await abortedBy(code, attempt);
+        await expect(run).rejects.toThrow("aborted");
+        expect(await state()).toMatchObject({
+          status: "pending",
+          errorCode: null,
+        });
+      }
+    }
+  });
+
+  test("a timeout is an ordinary failure: retried, then FAILED on the last attempt", async () => {
+    const early = await abortedBy("TIMEOUT", once);
+    await expect(early.run).rejects.toThrow("aborted");
+    expect(await early.state()).toMatchObject({ status: "pending" });
+    const final = await abortedBy("TIMEOUT", last);
+    await final.run;
+    expect(await final.state()).toMatchObject({
+      status: "failed",
+      errorCode: "INDEXING_FAILED",
+    });
   });
 
   test("a document that ends FAILED keeps no chunk", async () => {

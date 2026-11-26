@@ -199,6 +199,28 @@ describe("ensureVectorIndex", () => {
     expect(there.updated).toEqual([]);
   });
 
+  test("a definition with its keys in another order is the same", async () => {
+    const [vector, ...filters] = vectorIndexDefinition.definition.fields;
+    const there = search([
+      {
+        name: VECTOR_INDEX_NAME,
+        latestDefinition: {
+          fields: [
+            {
+              similarity: vector.similarity,
+              numDimensions: vector.numDimensions,
+              path: vector.path,
+              type: vector.type,
+            },
+            ...filters.map(({ path, type }) => ({ path, type })),
+          ],
+        },
+      },
+    ]);
+    expect(await ensureVectorIndex(there.collection)).toBe("unchanged");
+    expect(there.updated).toEqual([]);
+  });
+
   test("updates an index whose definition differs", async () => {
     const old = search([
       {
