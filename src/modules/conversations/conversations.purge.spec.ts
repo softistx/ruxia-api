@@ -256,13 +256,14 @@ describe("ConversationsPurge", () => {
     const logs: string[] = [];
     const stuck = purgeOf({
       media: { delete: () => new Promise<void>(() => {}) },
-      deadlineMs: 30,
+      deadlineMs: 250,
       log: (message) => logs.push(message),
     });
     expect(await stuck.tick()).toBe(0);
     expect(logs.some((message) => message.includes("timed out"))).toBe(true);
     expect(await live(hung)).not.toBeNull();
     const next = await deletedAgo(ada, RESTORE_WINDOW_MS + day);
+    // The same purge is free again: its tick was not left running.
     expect(await stuck.tick()).toBe(1);
     expect(await live(next)).toBeNull();
   });

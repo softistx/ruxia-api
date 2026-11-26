@@ -28,6 +28,15 @@ const CONVERSATIONS_QUERY = graphql(`
   }
 `);
 
+const TRASH = graphql(`
+  query PrivateTrash {
+    conversations(filter: { deleted: true }) {
+      totalCount
+      edges { node { id deletedAt purgeAt } }
+    }
+  }
+`);
+
 const OPERATIONS = graphql(`
   query PrivateReads($id: ID!, $search: String) {
     pinnedMessages(conversationId: $id) { id }
@@ -247,5 +256,47 @@ describe("a member's conversations are private", () => {
       expect(search.data?.conversations.totalCount ?? 0).toBe(0);
     }
     expect((await ada.conversations.find(id)).deletedAt).toBeNull();
+  });
+
+  test("each member's trash holds only their own, in both directions, totalCount included", async () => {
+    const kit = authApp();
+    const ada = await memberOf(kit);
+    const bea = await memberOf(kit);
+    const admin = await memberOf(kit, { role: "admin" });
+    const made: Record<string, string> = {};
+    for (const member of [ada, bea]) {
+      const sage = await member.personas.create({
+        name: "Sage",
+        defaultModelId: sonnet,
+      });
+      const started = await member.conversations.start({
+        personaId: String(sage._id),
+      });
+      await member.runMessages.insertExchange({
+        conversation: started,
+        parentId: null,
+        text: "in the trash",
+        modelId: sonnet,
+      });
+      made[member.id] = String(started._id);
+      await appMongo.db.conversations.raw.updateOne(
+        { _id: started._id },
+        { $set: { activeRunId: null } },
+      );
+      await member.conversations.delete(String(started._id));
+    }
+    for (const [member, other] of [
+      [ada, bea],
+      [bea, ada],
+    ] as const) {
+      const trash = await kit.client(member.token).query(TRASH);
+      expect(trash.data?.conversations.totalCount).toBe(1);
+      const nodes = trash.data?.conversations.edges.map((e) => e.node.id);
+      expect(nodes).toEqual([made[member.id] as string]);
+      expect(nodes).not.toContain(made[other.id] as string);
+      expect(trash.data?.conversations.edges[0]?.node.purgeAt).not.toBeNull();
+    }
+    const seen = await kit.client(admin.token).query(TRASH);
+    expect(seen.data?.conversations.totalCount).toBe(0);
   });
 });

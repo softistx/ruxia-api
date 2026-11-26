@@ -181,10 +181,13 @@ extend type Mutation {
   """
   Stores the conversation as a file and returns its media key: the branch shown
   for MARKDOWN, the whole tree for JSON. Download it at
-  `/media/conversation-exports/<key>` (the owner alone; a new export of the
-  same conversation and format replaces the previous file). 404
-  `conversations.errors.not-found`; 503 `auth.errors.unavailable` when the
-  file cannot be stored.
+  `/media/conversation-exports/<key>` (the owner alone, while the conversation
+  is live). A newer export of the same conversation and format replaces the
+  previous file, so the previous key stops working: download at once. 404
+  `conversations.errors.not-found` for an unknown, foreign or deleted
+  conversation; 429 `conversations.errors.too-many-exports` past 10 exports an
+  hour (burst 3); 503 `auth.errors.unavailable` when the file cannot be
+  stored.
   """
   exportConversation(
     "The conversation's id."

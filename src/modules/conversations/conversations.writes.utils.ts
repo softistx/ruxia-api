@@ -180,7 +180,10 @@ export const pushReactionWrite = (input: {
 });
 
 // The conversation brought back, only while it was deleted within the window
-// and the purge has not taken it.
+// and the purge has not taken it. `purgingAt: null` is defence in depth: the
+// window already keeps a restore and a purge apart (the purge takes only what
+// is past it), and the condition keeps them apart if the clocks of two
+// processes drift, so a conversation the purge holds is never restored.
 export const restoreConversationWrite = (input: {
   conversationId: ObjectId;
   actor: string;
