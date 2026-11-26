@@ -11,11 +11,13 @@ import {
   SignInService,
   StepUpService,
 } from "./accounts";
+import { BudgetsService, noPush } from "./budgets";
 import {
   type ConversationsRuntime,
   conversationsServices,
   type ExportBucket,
   type ModelAdapters,
+  SpendService,
 } from "./conversations";
 import { InvitationsService } from "./invitations";
 import { MembersService, memberRenamer } from "./members";
@@ -63,10 +65,26 @@ export function services(deps: {
     deps.viewer,
     (id) => owners.load(id),
   );
+  // The month's spend is conversations' aggregate; the budgets read it through
+  // their port and the runs ask the budgets back (the send stop, the alert).
+  const budgets = new BudgetsService(
+    {
+      mongo: appMongo,
+      spend: new SpendService(appMongo),
+      members,
+      mail: { mailer: deps.auth.mailer, from: deps.auth.from },
+      background: deps.auth.background,
+      // Web Push (slice 14) replaces this no-op.
+      onAlert: noPush,
+      now: deps.now,
+    },
+    deps.viewer,
+  );
   const chat = conversationsServices({
     mongo: appMongo,
     viewer: deps.viewer,
     models: modelCatalogue,
+    budgets,
     personas,
     adapters: deps.adapters,
     titleModelId: deps.titleModelId,
@@ -99,6 +117,7 @@ export function services(deps: {
       memberRenamer(appMongo),
     ),
     models: modelCatalogue,
+    budgets,
     personas,
     ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>

@@ -1,12 +1,15 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { authApp } from "~/auth";
+import { clearBudgets } from "~/budgets";
 import { memberOf, sonnet } from "~/conversations";
 import { appMongo } from "../../../config/db";
+import type { Finish } from "./run-messages.service";
 
 const kit = authApp();
 type Member = Awaited<ReturnType<typeof memberOf>>;
 
 beforeAll(async () => {
+  await clearBudgets();
   await appMongo.db.conversations.raw.deleteMany({});
   await appMongo.db.messages.raw.deleteMany({});
 });
@@ -185,5 +188,89 @@ describe("RunMessagesService: release", () => {
     expect((await ada.conversations.find(id)).activeRunId).toBe(
       String(second.assistant._id),
     );
+  });
+});
+
+const usage = {
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  webSearches: 0,
+};
+
+// A started exchange of `ada` under the clock `now`, ended with `end`.
+async function ended(ada: Member, end: Partial<Finish>) {
+  const conversation = await ada.conversations.find(await started(ada));
+  const { assistant } = await ada.runMessages.insertExchange({
+    conversation,
+    parentId: null,
+    text: "hello",
+    modelId: sonnet,
+  });
+  return ada.runMessages.finalise(assistant, { ...finish, ...end } as Finish);
+}
+
+const ledger = (ownerId: string) =>
+  appMongo.db.spend.raw.find({ ownerId }).toArray();
+
+describe("RunMessagesService: the spend ledger", () => {
+  test("an ended message adds its figures to the Toronto month it was created in", async () => {
+    const ada = await memberOf(kit, {
+      now: () => new Date("2026-12-01T04:30:00.000Z"),
+    });
+    await ended(ada, { usage, cost: 0.5 });
+    const rows = await ledger(ada.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      month: "2026-11",
+      modelId: sonnet,
+      costUsd: 0.5,
+      inputTokens: 100,
+      outputTokens: 20,
+      messages: 1,
+    });
+  });
+
+  test("a stopped run with partial usage is counted; a message with no usage and no cost is not", async () => {
+    const ada = await memberOf(kit);
+    await ended(ada, { status: "stopped", usage, cost: 0.25 });
+    await ended(ada, { status: "failed", usage: null, cost: null });
+    await ended(ada, { usage, cost: null });
+    const [row] = await ledger(ada.id);
+    expect(row).toMatchObject({ messages: 2, costUsd: 0.25, inputTokens: 200 });
+  });
+
+  test("a lost end (already ended) counts nothing twice", async () => {
+    const ada = await memberOf(kit);
+    const conversation = await ada.conversations.find(await started(ada));
+    const { assistant } = await ada.runMessages.insertExchange({
+      conversation,
+      parentId: null,
+      text: "hello",
+      modelId: sonnet,
+    });
+    const end = { ...finish, usage, cost: 1 };
+    expect(await ada.runMessages.finalise(assistant, end)).toBe(true);
+    expect(await ada.runMessages.finalise(assistant, end)).toBe(false);
+    expect((await ledger(ada.id))[0]).toMatchObject({
+      costUsd: 1,
+      messages: 1,
+    });
+  });
+
+  test("concurrent finalises add up exactly", async () => {
+    const ada = await memberOf(kit);
+    await Promise.all(
+      Array.from({ length: 8 }, () => ended(ada, { usage, cost: 1 })),
+    );
+    const rows = await ledger(ada.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      costUsd: 8,
+      messages: 8,
+      inputTokens: 800,
+      outputTokens: 160,
+    });
   });
 });

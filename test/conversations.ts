@@ -19,6 +19,7 @@ export function fakeAdapters(script: Script = []): ModelAdapters & {
 
 import { appMongo } from "../src/config/db";
 import { type Throttle, unthrottled } from "../src/limits/throttle";
+import { type AlertHook, BudgetsService, noPush } from "../src/modules/budgets";
 import {
   BranchesService,
   type ConversationsRuntime,
@@ -33,9 +34,15 @@ import {
   RunsService,
   SEARCH_CAP,
   SearchService,
+  SpendService,
   TitlesService,
 } from "../src/modules/conversations";
-import { ModelsService, noStatuses } from "../src/modules/models";
+import { MembersService } from "../src/modules/members";
+import {
+  ModelsService,
+  noStatuses,
+  type StatusStore,
+} from "../src/modules/models";
 import { AvatarsService, PersonasService } from "../src/modules/personas";
 import { adaptersByModel } from "./ai";
 // A member's conversation services for specs, over a real account: the
@@ -62,6 +69,8 @@ type MemberOptions = {
   // The bucket the exports go to (a memory one by default).
   media?: ExportBucket;
   exports?: Throttle["exports"];
+  // The Ollama probe's cached answer (none: Ollama is offline).
+  statuses?: StatusStore;
 };
 
 type Kit = ReturnType<typeof authApp>;
@@ -69,7 +78,11 @@ type SessionViewer = Awaited<ReturnType<typeof sessionViewer>>;
 
 // The services every other one is built on, for one viewer.
 function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
-  const models = new ModelsService(appMongo, noStatuses, () => {});
+  const models = new ModelsService(
+    appMongo,
+    options.statuses ?? noStatuses,
+    () => {},
+  );
   const personas = new PersonasService(
     appMongo,
     models,
@@ -108,6 +121,8 @@ function servicesOfMember(
   kit: Kit,
   options: MemberOptions,
   viewer: SessionViewer,
+  // Where an 80 % budget alert goes besides the mail (the push, slice 14).
+  onAlert: AlertHook,
 ) {
   const core = coreOf(kit, options, viewer);
   const { conversations, messages, idle, now } = core;
@@ -121,8 +136,23 @@ function servicesOfMember(
     warn,
     now,
   );
+  // The budgets, over the real spend, as the registry wires them: a member
+  // with the default budget (20 USD) and the kit's memory mailer.
+  const budgets = new BudgetsService(
+    {
+      mongo: appMongo,
+      spend: new SpendService(appMongo),
+      members: new MembersService(appMongo, kit.auth, viewer),
+      mail: { mailer: kit.auth.mailer, from: kit.auth.from },
+      background: kit.auth.background,
+      onAlert,
+      now,
+    },
+    viewer,
+  );
   const deps = {
     conversations,
+    budgets,
     messages,
     runMessages: core.runMessages,
     titles,
@@ -139,6 +169,7 @@ function servicesOfMember(
   };
   return {
     personas: core.personas,
+    budgets,
     conversations,
     messages,
     runMessages: core.runMessages,
@@ -175,15 +206,25 @@ function servicesOfMember(
   };
 }
 
-// A member's conversation services for specs, over a real account.
-export async function memberOf(kit: Kit, options: MemberOptions = {}) {
+// A member's conversation services for specs, over a real account, whose
+// budget alerts go to no push (`noPush`).
+export function memberOf(kit: Kit, options: MemberOptions = {}) {
+  return memberAlertedTo(kit, noPush, options);
+}
+
+// The same, with the hook budget alerts are announced to (the push's place).
+export async function memberAlertedTo(
+  kit: Kit,
+  onAlert: AlertHook,
+  options: MemberOptions = {},
+) {
   const account = await signedInAccount(kit, options);
   const viewer = await sessionViewer(kit, account.token);
   return {
     id: account.userId,
     token: account.token,
     viewer,
-    ...servicesOfMember(kit, options, viewer),
+    ...servicesOfMember(kit, options, viewer, onAlert),
   };
 }
 

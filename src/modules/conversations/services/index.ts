@@ -9,4 +9,5 @@ export * from "./run-messages.service";
 export * from "./run-start.service";
 export * from "./runs.service";
 export * from "./search.service";
+export * from "./spend.service";
 export * from "./titles.service";

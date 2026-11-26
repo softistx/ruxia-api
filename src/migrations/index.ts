@@ -7,6 +7,7 @@ import { modelsSeed } from "./2026-11-25-models-seed.migration";
 import { personasErrors } from "./2026-11-25-personas-errors.migration";
 import { conversationsErrors } from "./2026-11-26-conversations-errors.migration";
 import { messagesErrors } from "./2026-11-27-messages-errors.migration";
+import { budgetsErrors } from "./2026-11-28-budgets-errors.migration";
 
 // Every data migration, in execution order. A migration only grows: a new one
 // is appended, none is edited once it ran.
@@ -19,4 +20,5 @@ export const migrations: Migration[] = [
   personasErrors,
   conversationsErrors,
   messagesErrors,
+  budgetsErrors,
 ];

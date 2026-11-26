@@ -1,6 +1,9 @@
 import { type AgentEvent, type AgentResult, AiError } from "@softistx/ai-core";
 import type { Background } from "../../../shared/background";
-import type { ConversationModels } from "../conversations.integrity";
+import type {
+  ConversationBudgets,
+  ConversationModels,
+} from "../conversations.integrity";
 import { finishOf } from "../conversations.rules";
 import { FINALISE_FAILED, INTERRUPTED } from "../conversations.run-codes";
 import { ShutdownError } from "../conversations.runtime";
@@ -25,6 +28,7 @@ export interface Started {
 export interface RunEndDeps {
   runMessages: Pick<RunMessagesService, "finalise" | "release">;
   titles: Pick<TitlesService, "name">;
+  budgets: Pick<ConversationBudgets, "checkAlert">;
   background: Background;
   warn: (message: string) => void;
 }
@@ -47,7 +51,7 @@ export class RunEndService {
     abortReason: unknown,
     error?: unknown,
   ) {
-    const { runMessages, titles, background, warn } = this.deps;
+    const { runMessages, titles, budgets, background, warn } = this.deps;
     const runId = String(exchange.assistant._id);
     try {
       const finish = finishOf({
@@ -60,6 +64,15 @@ export class RunEndService {
       if (error instanceof AiError) finish.errorCode = error.code;
       if (error instanceof ShutdownError) finish.errorCode = INTERRUPTED;
       const ended = await runMessages.finalise(exchange.assistant, finish);
+      // The cost is written: the member's 80 % alert is checked in the
+      // background, so it never slows or fails the run's end. A free reply
+      // (cost 0) or one of unknown price (null) cannot raise it.
+      if (ended && (finish.cost ?? 0) > 0) {
+        const { ownerId, createdAt } = exchange.assistant;
+        background.run("budget alert", () =>
+          budgets.checkAlert(ownerId, createdAt),
+        );
+      }
       if (ended && exchange.first && finish.status === "done") {
         const reply = joinedText(finish.parts);
         background.run("title", () =>

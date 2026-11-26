@@ -162,6 +162,14 @@ describe("ModelsService", () => {
     expect(await service.enabled("nope")).toBe(false);
   });
 
+  test("providerOf names the provider of a model of the catalogue, undefined for an unknown id", async () => {
+    const service = serviceOf(ollamaDown);
+    expect(await service.providerOf("claude-sonnet-5-5")).toBe("anthropic");
+    expect(await service.providerOf("spec-svc:mac")).toBe("ollama");
+    expect(await service.providerOf("spec-svc:off")).toBe("ollama");
+    expect(await service.providerOf("nope")).toBeUndefined();
+  });
+
   test("requireAvailable refuses unknown, disabled and offline models", async () => {
     const service = serviceOf();
     await expect(service.requireAvailable("nope")).rejects.toMatchObject(

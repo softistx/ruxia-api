@@ -71,6 +71,13 @@ export class MembersService {
     return ids.map((id) => ({ id, name: names.get(id) ?? "" }));
   }
 
+  // Every member's id and name, for the team's usage figures (administrators
+  // only: the resolver ran the guard).
+  async roster() {
+    const found = await this.members.findMany({});
+    return found.map((member) => ({ id: member._id, name: member.name }));
+  }
+
   // The member's role: null for an account that holds none.
   roleOf(id: string): Promise<Role | null> {
     return this.auth.roles.roleOf(id);

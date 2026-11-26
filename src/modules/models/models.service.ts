@@ -78,6 +78,13 @@ export class ModelsService {
     return model?.enabled === true;
   }
 
+  // The provider of a model of the catalogue, undefined for an id that names
+  // none: what a send reads to tell a paid model from a free one, before
+  // `requireAvailable` refuses the unknown, disabled or offline ones.
+  async providerOf(id: string) {
+    return (await this.mongo.db.models.findById(id))?.provider;
+  }
+
   // What a send to `id` calls before it reaches the provider: the model, or
   // `not-found`, `disabled` (an admin has not enabled it) and `offline` (an
   // Ollama server that is off or does not have it).

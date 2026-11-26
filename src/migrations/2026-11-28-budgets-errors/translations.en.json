@@ -1,0 +1,3 @@
+{
+  "budgets.errors.exhausted": "Your monthly budget is used up ({spentUsd, number} $ spent of {budgetUsd, number} $). Sending to paid models resumes at the start of next month; local models stay available."
+}

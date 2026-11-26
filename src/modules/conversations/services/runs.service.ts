@@ -78,7 +78,10 @@ export class RunsService {
       throw modelUnavailable();
     }
     const user = await messages.find(String(message.parentId));
-    const conversation = await this.start.admit(String(message.conversationId));
+    const conversation = await this.start.admit(
+      String(message.conversationId),
+      asked,
+    );
     return this.start.exchange(conversation, { user }, asked);
   }
 

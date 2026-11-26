@@ -1,0 +1,3 @@
+{
+  "budgets.errors.exhausted": "Votre budget mensuel est épuisé ({spentUsd, number} $ dépensés sur {budgetUsd, number} $). L'envoi vers les modèles payants reprend au début du mois prochain; les modèles locaux restent disponibles."
+}

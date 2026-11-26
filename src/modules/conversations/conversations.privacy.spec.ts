@@ -167,6 +167,23 @@ describe("a member's conversations are private", () => {
     ]);
   });
 
+  test("the admin's team usage is figures only: no content, title or conversation field", () => {
+    const figures = ["TeamUsage", "MemberUsage", "ModelUsage", "Usage"];
+    const allowed = new Set(["String", "ID", "Int", "Float", "Boolean"]);
+    for (const name of figures) {
+      const type = schema.getType(name);
+      expect(type && isObjectType(type)).toBe(true);
+      if (!type || !isObjectType(type)) continue;
+      for (const [field, definition] of Object.entries(type.getFields())) {
+        expect(field).not.toMatch(
+          /content|title|text|parts|body|summary|conversation|persona|attachment/i,
+        );
+        const inner = String(definition.type).replace(/[[\]!]/g, "");
+        expect(allowed.has(inner) || figures.includes(inner)).toBe(true);
+      }
+    }
+  });
+
   test("the admin and other members get not-found on a run's stream and on stopRun", async () => {
     const live = authApp(unthrottled, {
       adapters: adaptersByModel({ [sonnet]: stallingModel() }),

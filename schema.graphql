@@ -112,17 +112,41 @@ An integer of any size, as a decimal string (a safe-integer number is accepted a
 """
 scalar BigInt
 
+"""The team's budget settings."""
+type BudgetSettings {
+  """The monthly budget of a member with none of its own, in USD."""
+  defaultMonthlyUsd: Float!
+}
+
 """
-Where the member stands against its budget. A placeholder until budgets land
-(spec 4.12): no limit, nothing spent.
+Where the signed-in member stands against its monthly budget (docs/spec.md,
+section 4.12). The month is the calendar month in America/Toronto. At 80 % the
+member is alerted once (`alertedAt`, and a mail); at 100 % a send to a paid
+model is refused with 409 `budgets.errors.exhausted` and local models stay
+usable. A run already started finishes and records its cost, so the spend may
+pass the budget by that run.
 """
 type BudgetStatus {
-  """The period's limit in cents; null without one."""
-  limitCents: Int
-  """Whether a limit applies to the member."""
-  limited: Boolean!
-  """What the member spent this period, in cents."""
-  usedCents: Int!
+  """
+  When the 80 % alert of the month was raised; null while it has not been.
+  """
+  alertedAt: DateTime
+  """
+  The member's budget for the month, in USD: its own, else the team default.
+  """
+  budgetUsd: Float!
+  """
+  Whether a send to a paid model is refused (the spend reached the budget).
+  """
+  exhausted: Boolean!
+  """The month, `YYYY-MM`."""
+  month: String!
+  """How much of the budget is spent, in percent; may pass 100."""
+  percent: Float!
+  """When the month ends and the spend starts again at 0."""
+  resetsAt: DateTime!
+  """What the member's replies cost this month, in USD."""
+  spentUsd: Float!
 }
 
 """An IPv4 block in CIDR notation, such as 10.0.0.0/8."""
@@ -509,6 +533,18 @@ type Member {
   role: Role!
 }
 
+"""A member's own budget."""
+type MemberBudget {
+  """The budget that applies, in USD."""
+  effectiveUsd: Float!
+  """The member's id."""
+  memberId: ID!
+  """
+  The member's own monthly budget in USD; null when it follows the default.
+  """
+  monthlyUsd: Float
+}
+
 """A page of members."""
 type MemberConnection {
   """The members of the page."""
@@ -553,6 +589,22 @@ input MemberSettingsInput {
   rememberWithoutAsking: Boolean
   """Whether a voice reply plays by itself."""
   voiceAutoPlay: Boolean
+}
+
+"""One member's month in the team's usage: figures only, no conversation."""
+type MemberUsage {
+  """The member's budget for the month, in USD."""
+  budgetUsd: Float!
+  """Whether the budget is the member's own (true) or the team default."""
+  customBudget: Boolean!
+  """The member's id."""
+  memberId: ID!
+  """The member's name."""
+  name: String!
+  """How much of the budget is spent, in percent."""
+  percent: Float!
+  """What the member's replies cost, in USD."""
+  spentUsd: Float!
 }
 
 """
@@ -701,6 +753,26 @@ enum ModelProvider {
   An Ollama server (the owner's Mac): free, and offline when the Mac is off.
   """
   OLLAMA
+}
+
+"""What the replies of one model cost, and the tokens they used."""
+type ModelUsage {
+  """Tokens read from the cache."""
+  cacheReadTokens: Int!
+  """Tokens written to the cache."""
+  cacheWriteTokens: Int!
+  """Input tokens."""
+  inputTokens: Int!
+  """How many replies."""
+  messages: Int!
+  """The model's id, as the catalogue names it."""
+  modelId: String!
+  """Output tokens."""
+  outputTokens: Int!
+  """The cost, in USD."""
+  spentUsd: Float!
+  """Web searches."""
+  webSearches: Int!
 }
 
 """
@@ -1074,6 +1146,26 @@ type Mutation {
     modelId: String! @constraint(minLength: 1, maxLength: 200)
   ): Conversation!
   """
+  Sets the default monthly budget, in USD (0 to 100000; 0 allows no paid model). Administrators only.
+  """
+  setDefaultBudget(
+    """The default monthly budget, in USD."""
+    monthlyUsd: Float! @constraint(min: 0, max: 100000)
+  ): BudgetSettings!
+  """
+  Sets a member's own monthly budget in USD, or null to follow the default.
+  A raised budget lifts a refusal at once. Administrators only. 404
+  `members.errors.not-found`.
+  """
+  setMemberBudget(
+    """The member's id."""
+    memberId: ID! @constraint(maxLength: 64)
+    """
+    The member's monthly budget in USD (0 to 100000); null follows the default.
+    """
+    monthlyUsd: Float @constraint(min: 0, max: 100000)
+  ): MemberBudget!
+  """
   Gives a member its one role. The last administrator cannot be demoted: 409
   `members.errors.last-admin`. Administrators only.
   """
@@ -1407,6 +1499,8 @@ Read operations. A signed-in viewer is needed unless a field says otherwise;
 an unauthenticated call is 401 `auth.errors.unauthenticated`.
 """
 type Query {
+  """The team's budget settings. Administrators only."""
+  budgetSettings: BudgetSettings!
   """
   The TEAM personas, by name (the featured ones, in order, with
   `featuredOnly`). Every role reads the same list: PRIVATE personas never
@@ -1532,6 +1626,20 @@ type Query {
     """The conversation's id."""
     conversationId: ID! @constraint(maxLength: 64)
   ): [Message!]!
+  """
+  The team's usage per member and per model for a month. Administrators only: 403 `auth.errors.forbidden`.
+  """
+  teamUsage(
+    """The month, `YYYY-MM`; default the current month."""
+    month: String @constraint(pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$")
+  ): TeamUsage!
+  """
+  The signed-in member's usage for a month (`YYYY-MM`, default the current month in America/Toronto).
+  """
+  usage(
+    """The month, `YYYY-MM`."""
+    month: String @constraint(pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$")
+  ): Usage!
   """
   The signed-in account, or null for an anonymous request. Refuses nothing.
   """
@@ -1727,6 +1835,20 @@ enum StepUpMethod {
   EMAIL
 }
 
+"""The team's usage for a month: figures only, never content or titles."""
+type TeamUsage {
+  """The default monthly budget, in USD."""
+  defaultBudgetUsd: Float!
+  """Every member, the biggest spender first."""
+  members: [MemberUsage!]!
+  """The team's figures per model, the dearest first."""
+  models: [ModelUsage!]!
+  """The month, `YYYY-MM`."""
+  month: String!
+  """What the whole team spent, in USD."""
+  spentUsd: Float!
+}
+
 """A time of day with its offset, such as 10:15:30Z (RFC 3339 full-time)."""
 scalar Time @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc3339#section-5.6")
 
@@ -1787,17 +1909,29 @@ input UpdatePersonaInput {
   voiceId: String @constraint(maxLength: 100)
 }
 
-"""What a model call consumed."""
+"""The signed-in member's usage for a month: figures only."""
 type Usage {
-  """Of the input, those read from the prompt cache."""
+  """The month's budget, in USD."""
+  budgetUsd: Float!
+  """Tokens read from the cache."""
   cacheReadTokens: Int!
-  """Of the input, those written to the prompt cache."""
+  """Tokens written to the cache."""
   cacheWriteTokens: Int!
-  """All input tokens, the cached ones included."""
+  """Input tokens."""
   inputTokens: Int!
+  """How many replies."""
+  messages: Int!
+  """The same figures per model, the dearest first."""
+  models: [ModelUsage!]!
+  """The month, `YYYY-MM`."""
+  month: String!
   """Output tokens."""
   outputTokens: Int!
-  """Web searches the model ran."""
+  """How much of the budget is spent, in percent."""
+  percent: Float!
+  """What the replies cost, in USD."""
+  spentUsd: Float!
+  """Web searches."""
   webSearches: Int!
 }
 
@@ -1806,8 +1940,8 @@ scalar UtcOffset
 
 """The signed-in account."""
 type Viewer {
-  """The member's budget status."""
-  budget: BudgetStatus!
+  """Where the member stands against its budget this month."""
+  budgetStatus: BudgetStatus!
   """The sign-in address."""
   email: EmailAddress!
   """Identifier of the account (the user id), also the member's id."""

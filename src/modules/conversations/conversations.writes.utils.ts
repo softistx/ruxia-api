@@ -1,4 +1,5 @@
 import type { ObjectId } from "mongodb";
+import { monthOf } from "../../shared/months";
 import { joinedText } from "./conversations.utils";
 import type { Finish } from "./services/run-messages.service";
 
@@ -61,6 +62,40 @@ export const endMessage = (
     ...bump,
   },
 });
+
+// What a finalised assistant message adds to the spend ledger: one `$inc`
+// upsert on (owner, Toronto month of the message's creation, model), or null
+// for a message that has neither usage nor cost (a failed start). A stopped or
+// failed run with partial usage counts; a reply of unknown price (null cost)
+// counts its tokens and no money.
+export const spendIncrement = (
+  message: { ownerId: string; modelId: string | null; createdAt: Date },
+  end: Pick<Finish, "usage" | "cost">,
+  at: Date,
+) => {
+  if (end.usage === null && end.cost === null) return null;
+  const usage = end.usage;
+  return {
+    filter: {
+      ownerId: message.ownerId,
+      month: monthOf(message.createdAt),
+      modelId: message.modelId ?? "unknown",
+    },
+    update: {
+      $inc: {
+        costUsd: end.cost ?? 0,
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+        cacheReadTokens: usage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
+        webSearches: usage?.webSearches ?? 0,
+        messages: 1,
+      },
+      $set: { updatedAt: at },
+      $setOnInsert: { createdAt: at },
+    },
+  };
+};
 
 // The conversation freed, only while this run holds it; the end of an answer
 // moves `lastMessageAt`, a release by hand does not.
