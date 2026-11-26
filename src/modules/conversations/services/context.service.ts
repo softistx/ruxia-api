@@ -42,8 +42,8 @@ export class ContextService {
   // The context of a model call over `path`: the summary stored on the deepest
   // message that has one, and the messages after it, folded again when they
   // pass the budget. The new summary is stored on the message it covers through
-  // (`summaryAnchor`; the fold is cut at whole messages, see `wholeFold`, so
-  // it always has one and holds for every branch below it). The fold sees an
+  // (`summaryAnchor`: only a fold that ends on a whole message is stored, and
+  // it then holds for every branch below it). The fold sees an
   // attachment as its name; `expand` then gives the model the real parts of the
   // kept messages that carry one. The context starts on a member's message
   // (`startOnMember`).
@@ -61,6 +61,7 @@ export class ContextService {
       result.throughMessageId === undefined
         ? undefined
         : summaryAnchor(path, result.throughMessageId);
+    // Temporary, until softistx/ai#222: a fold inside an answer is not stored, so the next run folds again
     if (result.summary !== undefined && anchor !== undefined) {
       await this.store(anchor, {
         text: result.summary,
@@ -89,13 +90,11 @@ export class ContextService {
     summarize: (messages: Message[]) => Promise<string>,
   ) {
     const run = (limit: number) =>
-      wholeFold(stored, (list) =>
-        compact(list, {
-          budget: limit,
-          summarize,
-          ...(summary && { summary: { text: summary.text } }),
-        }),
-      );
+      compact(stored, {
+        budget: limit,
+        summarize,
+        ...(summary && { summary: { text: summary.text } }),
+      });
     const first = await run(budget);
     const ids = new Set(first.messages.map((message) => docIdOf(message.id)));
     const reserved = attachmentTokens(
@@ -133,42 +132,5 @@ export class ContextService {
           }
         : stored.message;
     });
-  }
-}
-
-type Folded = Awaited<ReturnType<typeof compact>>;
-
-// `fold` over `stored`, moved back so it never ends inside an answer: when the
-// cut lands on a turn that is not the answer's last, the fold is run again on
-// the list up to just before that answer, and the answer and what follows are
-// kept whole. A fold that cannot be moved (nothing before the answer, or the
-// shorter list needs no fold) is left as it was.
-export async function wholeFold(
-  stored: StoredMessage[],
-  fold: (list: StoredMessage[]) => Promise<Folded>,
-): Promise<Folded> {
-  let list = stored;
-  let result = await fold(list);
-  for (;;) {
-    const through = result.throughMessageId;
-    if (through === undefined || !through.includes("#")) return result;
-    const doc = docIdOf(through);
-    const turns = list.filter((m) => docIdOf(m.id) === doc);
-    if (through === turns.at(-1)?.id) return result;
-    const first = list.findIndex((m) => docIdOf(m.id) === doc);
-    if (first <= 0) return result;
-    const before = list.slice(0, first);
-    const again = await fold(before);
-    if (again.summary === undefined) return result;
-    const rest = stored.slice(before.length);
-    result = {
-      summary: again.summary,
-      ...(again.throughMessageId !== undefined && {
-        throughMessageId: again.throughMessageId,
-      }),
-      messages: [...again.messages, ...rest],
-      tokens: again.tokens + estimateTokens(rest.map((m) => m.message)),
-    };
-    list = before;
   }
 }

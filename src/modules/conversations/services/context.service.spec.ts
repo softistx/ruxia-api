@@ -105,64 +105,7 @@ describe("ContextService", () => {
     expect(JSON.stringify(context.messages)).toContain("the new answer");
   });
 
-  // Eight plain messages, then a tool-heavy answer, then the member's message.
-  const heavy = () => {
-    const plain = Array.from({ length: 8 }, (_, i) =>
-      doc(i % 2 === 0 ? "user" : "assistant", [
-        text(`m${i} ${"w ".repeat(300)}`),
-      ]),
-    );
-    return [...plain, longAnswer(4), doc("user", [text("b")])];
-  };
-
-  test("a fold that would end inside an answer is moved back: whole answer kept, summary stored on a message", async () => {
-    const { service, stored, options } = setup();
-    const path = heavy();
-    const context = await service.context(path, options);
-    expect(context.summary).toBe("S");
-    expect(stored).toHaveLength(1);
-    const anchor = stored[0]?.[0];
-    expect(path.slice(0, 8).map((d) => String(d._id))).toContain(
-      anchor as string,
-    );
-    // The answer's nine turns are all there, in order.
-    const roles = context.messages.map((m) => m.role).join();
-    expect(roles).toContain(
-      "assistant,tool,assistant,tool,assistant,tool,assistant,tool,assistant",
-    );
-  });
-
-  test("two consecutive runs over a long tool-heavy answer summarise once, with the same system text", async () => {
-    let summarised = 0;
-    const store = new Map<string, StoredSummary>();
-    const service = new ContextService(
-      async (id, summary) => {
-        store.set(id, summary);
-      },
-      () => new Date(0),
-    );
-    const path = heavy();
-    const options = {
-      window: 6_800,
-      systemTokens: 0,
-      summarize: async () => {
-        summarised += 1;
-        return "S";
-      },
-      expand: async () => [],
-    };
-    const one = await service.context(path, options);
-    for (const d of path) {
-      const found = store.get(String(d._id));
-      if (found) d.contextSummary = found;
-    }
-    const two = await service.context(path, options);
-    expect(summarised).toBe(1);
-    expect(two.summary).toBe(one.summary);
-    expect(JSON.stringify(two.messages)).toEqual(JSON.stringify(one.messages));
-  });
-
-  test("a fold that cannot be moved (the answer is first) serves this call only and loses nothing", async () => {
+  test("a fold that ends inside an answer serves this call only, stores nothing and loses nothing", async () => {
     const { service, stored, options } = setup();
     const first = doc("user", [text("a")], {
       contextSummary: summaryOf("old"),
