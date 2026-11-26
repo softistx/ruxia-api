@@ -4,9 +4,17 @@ import { MigrationLockedError } from "@softistx/mongo/migrations";
 import { app } from "./app";
 import { appMongo, databaseOf } from "./config/db";
 import { env } from "./config/env";
+import { serverMedia } from "./config/media";
 import { redis, serverStatuses } from "./config/redis";
 import { MigrationsOutOfSyncError } from "./migrations/status";
-import { sweepRuns } from "./modules/conversations";
+import {
+  ConversationsPurge,
+  PURGE_BATCH,
+  PURGE_BUDGET_MS,
+  PURGE_DEADLINE_MS,
+  PURGE_INTERVAL_MS,
+  sweepRuns,
+} from "./modules/conversations";
 import {
   intervalTicker,
   ModelsProbe,
@@ -76,6 +84,25 @@ if (env.OLLAMA_BASE_URL === undefined) {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => probe.stop());
   }
+}
+
+// The daily purge of the conversations deleted more than 30 days ago, with
+// their messages and exports: started here only, never by a spec. Its timer is
+// unref'd; stopping it is for the tidy shutdown.
+const purge = new ConversationsPurge({
+  mongo: appMongo,
+  media: serverMedia,
+  ticker: intervalTicker,
+  now: () => new Date(),
+  intervalMs: PURGE_INTERVAL_MS,
+  batch: PURGE_BATCH,
+  budgetMs: PURGE_BUDGET_MS,
+  deadlineMs: PURGE_DEADLINE_MS,
+  log: (message) => console.warn(message),
+});
+purge.start();
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => purge.stop());
 }
 
 // In dev, the URL and the route table; in production, the URL alone. On

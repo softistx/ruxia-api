@@ -34,3 +34,22 @@ export function adaptersByModel(
 
 export const providerFailure = () =>
   new AiError("MODEL_ERROR", "the provider failed");
+
+// A model that answers as `inner` does, but only once `release()` is called:
+// the run is held until then, so a spec can read the state of a run in flight
+// without racing the model.
+export function gatedModel(inner: ModelAdapter) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const model: ModelAdapter = {
+    provider: inner.provider,
+    model: inner.model,
+    async *stream(request, signal): AsyncGenerator<ModelEvent> {
+      await gate;
+      yield* inner.stream(request, signal);
+    },
+  };
+  return { model, release };
+}

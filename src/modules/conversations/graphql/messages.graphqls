@@ -76,6 +76,12 @@ type Message {
   cost: Float
   "Why it failed, when FAILED."
   errorCode: String
+  "Where it stands among the messages that follow the same parent."
+  siblings: Siblings!
+  "The emojis the member reacted with, in order."
+  reactions: [String!]!
+  "Whether the member pinned it."
+  pinned: Boolean!
   "When it was written."
   createdAt: DateTime!
 }

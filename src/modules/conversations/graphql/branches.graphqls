@@ -1,0 +1,62 @@
+"""
+The messages that follow the same parent (edits of a message, regenerated
+answers), oldest first.
+"""
+type Siblings {
+  "Their ids, in creation order, this message's included."
+  ids: [ID!]!
+  "This message's place in `ids`, from 0."
+  index: Int!
+}
+
+extend type Query {
+  """
+  The pinned messages of one of the member's conversations, oldest first (at
+  most 100). 404 `conversations.errors.not-found`.
+  """
+  pinnedMessages(
+    "The conversation's id."
+    conversationId: ID! @constraint(maxLength: 64)
+  ): [Message!]!
+}
+
+extend type Mutation {
+  """
+  Shows the branch through a message: `Conversation.activeLeafId` moves to the
+  deepest leaf below it, following the latest child at each step. 404
+  `conversations.errors.not-found` or `conversations.errors.message-not-found`;
+  409 `conversations.errors.run-in-progress` while an answer is being written.
+  """
+  setActiveBranch(
+    "The conversation's id."
+    conversationId: ID! @constraint(maxLength: 64)
+    "A message of the branch to show."
+    messageId: ID! @constraint(maxLength: 64)
+  ): Conversation!
+
+  """
+  Toggles the member's reaction: added when absent, taken back when present.
+  `emoji` is one emoji (a single character as the keyboard gives it, at most
+  32 units). 404 `conversations.errors.message-not-found`; 400
+  `validation.errors.invalid-input` with `emoji` invalid
+  (`conversations.errors.invalid-emoji`); 409
+  `conversations.errors.reaction-limit` past 20 reactions on a message.
+  """
+  react(
+    "The message's id."
+    messageId: ID! @constraint(maxLength: 64)
+    "The emoji."
+    emoji: String! @constraint(minLength: 1, maxLength: 32)
+  ): Message!
+
+  """
+  Pins or unpins a message (idempotent). 404
+  `conversations.errors.message-not-found`.
+  """
+  pinMessage(
+    "The message's id."
+    messageId: ID! @constraint(maxLength: 64)
+    "Whether it is pinned."
+    pinned: Boolean!
+  ): Message!
+}

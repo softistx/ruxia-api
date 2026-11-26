@@ -28,6 +28,63 @@ const CONVERSATIONS_QUERY = graphql(`
   }
 `);
 
+const TRASH = graphql(`
+  query PrivateTrash {
+    conversations(filter: { deleted: true }) {
+      totalCount
+      edges { node { id deletedAt purgeAt } }
+    }
+  }
+`);
+
+const OPERATIONS = graphql(`
+  query PrivateReads($id: ID!, $search: String) {
+    pinnedMessages(conversationId: $id) { id }
+    conversations(filter: { search: $search }) { totalCount }
+  }
+`);
+
+const BRANCH = graphql(`
+  mutation PrivateBranch($id: ID!, $messageId: ID!) {
+    setActiveBranch(conversationId: $id, messageId: $messageId) { id }
+  }
+`);
+const EDIT = graphql(`
+  mutation PrivateEdit($messageId: ID!) {
+    editMessage(messageId: $messageId, text: "x") { runId }
+  }
+`);
+const REGENERATE = graphql(`
+  mutation PrivateRegenerate($messageId: ID!) {
+    regenerate(messageId: $messageId) { runId }
+  }
+`);
+const REACT = graphql(`
+  mutation PrivateReact($messageId: ID!) {
+    react(messageId: $messageId, emoji: "👍") { id }
+  }
+`);
+const PIN = graphql(`
+  mutation PrivatePin($messageId: ID!) {
+    pinMessage(messageId: $messageId, pinned: true) { id }
+  }
+`);
+const EXPORT = graphql(`
+  mutation PrivateExport($id: ID!) {
+    exportConversation(id: $id, format: JSON)
+  }
+`);
+const DELETE = graphql(`
+  mutation PrivateDelete($id: ID!) {
+    deleteConversation(id: $id) { id }
+  }
+`);
+const RESTORE = graphql(`
+  mutation PrivateRestore($id: ID!) {
+    restoreConversation(id: $id) { id }
+  }
+`);
+
 beforeAll(async () => {
   await appMongo.db.conversations.raw.deleteMany({});
   await appMongo.db.messages.raw.deleteMany({});
@@ -95,7 +152,15 @@ describe("a member's conversations are private", () => {
     expect(adminRoots.sort()).toEqual([
       "conversation",
       "conversations",
+      "deleteConversation",
+      "editMessage",
+      "pinMessage",
+      "pinnedMessages",
+      "react",
+      "regenerate",
+      "restoreConversation",
       "sendMessage",
+      "setActiveBranch",
       "setConversationModel",
       "startConversation",
       "stopRun",
@@ -140,5 +205,98 @@ describe("a member's conversations are private", () => {
     }
     expect((await ada.runMessages.ofRun(sent.runId))?.status).toBe("streaming");
     await ada.runs.stop(sent.runId);
+  });
+
+  test("every edit, branch, reaction, pin, export, delete and restore is not-found for the others, and a search never matches their text", async () => {
+    const kit = authApp();
+    const ada = await memberOf(kit);
+    const bea = await memberOf(kit);
+    const admin = await memberOf(kit, { role: "admin" });
+    const sage = await ada.personas.create({
+      name: "Sage",
+      defaultModelId: sonnet,
+    });
+    const started = await ada.conversations.start({
+      personaId: String(sage._id),
+    });
+    const { user, assistant } = await ada.runMessages.insertExchange({
+      conversation: started,
+      parentId: null,
+      text: "narwhal secret",
+      modelId: sonnet,
+    });
+    const id = String(started._id);
+    const messageId = String(assistant._id);
+    const notFound = "conversations.errors.not-found";
+    const noMessage = "conversations.errors.message-not-found";
+    for (const other of [bea, admin]) {
+      const client = kit.client(other.token);
+      const asked = [
+        [client.query(BRANCH, { variables: { id, messageId } }), notFound],
+        [
+          client.query(EDIT, { variables: { messageId: String(user._id) } }),
+          noMessage,
+        ],
+        [client.query(REGENERATE, { variables: { messageId } }), noMessage],
+        [client.query(REACT, { variables: { messageId } }), noMessage],
+        [client.query(PIN, { variables: { messageId } }), noMessage],
+        [client.query(EXPORT, { variables: { id } }), notFound],
+        [client.query(DELETE, { variables: { id } }), notFound],
+        [client.query(RESTORE, { variables: { id } }), notFound],
+      ] as const;
+      for (const [result, code] of asked) {
+        expect(codeOf(await result)).toBe(code);
+      }
+      expect(
+        codeOf(await client.query(OPERATIONS, { variables: { id } })),
+      ).toBe("conversations.errors.not-found");
+      const search = await client.query(OPERATIONS, {
+        variables: { id: String(started._id), search: "narwhal" },
+      });
+      expect(search.data?.conversations.totalCount ?? 0).toBe(0);
+    }
+    expect((await ada.conversations.find(id)).deletedAt).toBeNull();
+  });
+
+  test("each member's trash holds only their own, in both directions, totalCount included", async () => {
+    const kit = authApp();
+    const ada = await memberOf(kit);
+    const bea = await memberOf(kit);
+    const admin = await memberOf(kit, { role: "admin" });
+    const made: Record<string, string> = {};
+    for (const member of [ada, bea]) {
+      const sage = await member.personas.create({
+        name: "Sage",
+        defaultModelId: sonnet,
+      });
+      const started = await member.conversations.start({
+        personaId: String(sage._id),
+      });
+      await member.runMessages.insertExchange({
+        conversation: started,
+        parentId: null,
+        text: "in the trash",
+        modelId: sonnet,
+      });
+      made[member.id] = String(started._id);
+      await appMongo.db.conversations.raw.updateOne(
+        { _id: started._id },
+        { $set: { activeRunId: null } },
+      );
+      await member.conversations.delete(String(started._id));
+    }
+    for (const [member, other] of [
+      [ada, bea],
+      [bea, ada],
+    ] as const) {
+      const trash = await kit.client(member.token).query(TRASH);
+      expect(trash.data?.conversations.totalCount).toBe(1);
+      const nodes = trash.data?.conversations.edges.map((e) => e.node.id);
+      expect(nodes).toEqual([made[member.id] as string]);
+      expect(nodes).not.toContain(made[other.id] as string);
+      expect(trash.data?.conversations.edges[0]?.node.purgeAt).not.toBeNull();
+    }
+    const seen = await kit.client(admin.token).query(TRASH);
+    expect(seen.data?.conversations.totalCount).toBe(0);
   });
 });

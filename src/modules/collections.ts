@@ -5,7 +5,11 @@
 // collections here as it lands.
 
 export { roleLocks } from "../auth/roles.model";
-export { conversations, messages } from "./conversations/models";
+export {
+  conversationExports,
+  conversations,
+  messages,
+} from "./conversations/models";
 export { members } from "./members/members.model";
 export { models } from "./models/models.model";
 export { personaAvatars, personas } from "./personas/models";

@@ -14,6 +14,7 @@ import {
 import {
   type ConversationsRuntime,
   conversationsServices,
+  type ExportBucket,
   type ModelAdapters,
 } from "./conversations";
 import { InvitationsService } from "./invitations";
@@ -43,6 +44,8 @@ export function services(deps: {
   // Where the runs live (one per app) and what watches each of them.
   runtime: ConversationsRuntime;
   observers: readonly AgentObserver[];
+  // The private bucket (the exports of conversations).
+  media: ExportBucket;
   now: () => Date;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
@@ -71,6 +74,8 @@ export function services(deps: {
     observers: deps.observers,
     background: deps.auth.background,
     sends: deps.throttle.sends,
+    media: deps.media,
+    exports: deps.throttle.exports,
     warn: statusWarning,
     now: deps.now,
   });

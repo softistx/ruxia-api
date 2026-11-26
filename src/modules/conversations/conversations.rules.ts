@@ -141,3 +141,34 @@ const failed = (
   finishReason: null,
   errorCode,
 });
+
+// The most reactions one message carries, and the longest emoji (UTF-16 units).
+export const MAX_REACTIONS = 20;
+export const MAX_EMOJI_LENGTH = 32;
+
+const emojiShape =
+  /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3)/u;
+
+// A reaction is one emoji: a single grapheme (a flag, a keycap or a ZWJ
+// sequence count as one) that starts as an emoji does. Issues on `emoji`.
+export function emojiIssues(emoji: string): FieldIssue[] {
+  const graphemes = [...new Intl.Segmenter().segment(emoji)];
+  const sound =
+    emoji.length <= MAX_EMOJI_LENGTH &&
+    graphemes.length === 1 &&
+    emojiShape.test(emoji);
+  return sound
+    ? []
+    : [{ path: "emoji", code: "conversations.errors.invalid-emoji" }];
+}
+
+// How long a deleted conversation can be restored, and then purged after.
+export const RESTORE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+// How long a purge's hold lasts before another may take over a conversation a
+// crashed purge left.
+export const PURGE_HOLD_MS = 60 * 60 * 1000;
+
+// When a deleted conversation is purged for good.
+export const purgeAt = (deletedAt: Date) =>
+  new Date(deletedAt.getTime() + RESTORE_WINDOW_MS);

@@ -9,6 +9,14 @@ export const runs: Resolvers = {
       requireMember(ctx);
       return ctx.services.runs.send(input);
     },
+    editMessage: (_, { messageId, text }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.runs.edit(messageId, text);
+    },
+    regenerate: (_, { messageId, modelId }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.runs.regenerate(messageId, modelId);
+    },
     stopRun: (_, { runId }, ctx) => {
       requireMember(ctx);
       return ctx.services.runs.stop(runId);

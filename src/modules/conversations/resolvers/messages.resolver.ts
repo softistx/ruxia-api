@@ -18,6 +18,8 @@ export const messages: Resolvers = {
     text: (message) => joinedText(message.parts),
     parts: (message) => shownParts(message.parts),
     status: (message) => shownStatus(message.status),
+    siblings: (message, _, ctx) => ctx.services.messages.siblings(message),
+    reactions: (message) => message.reactions.map((reaction) => reaction.emoji),
     runId: (message) =>
       message.status === "streaming" ? String(message._id) : null,
   },

@@ -3,12 +3,19 @@ import { Throttled } from "../../limits/ports";
 import {
   codes,
   invalidCursor,
+  limitedExport,
   limitedSend,
+  messageNotFound,
   modelUnavailable,
+  notEditable,
   notFound,
+  notRegenerable,
   personaUnavailable,
+  reactionLimit,
+  restoreExpired,
   runInProgress,
   runNotFound,
+  tooManyExports,
   tooManyMessages,
 } from "./conversations.errors";
 
@@ -24,6 +31,11 @@ describe("conversations errors", () => {
       [runNotFound(), "run-not-found", 404],
       [modelUnavailable(), "model-unavailable", 409],
       [personaUnavailable(), "persona-unavailable", 409],
+      [messageNotFound(), "message-not-found", 404],
+      [notEditable(), "not-editable", 409],
+      [notRegenerable(), "not-regenerable", 409],
+      [reactionLimit(), "reaction-limit", 409],
+      [restoreExpired(), "restore-expired", 409],
     ] as const;
     for (const [error, slug, code] of cases) {
       expect(error.extensions["code"]).toBe(`conversations.errors.${slug}`);
@@ -60,8 +72,23 @@ describe("conversations errors", () => {
     await expect(broken).rejects.toThrow("boom");
   });
 
-  test("the inventory names all eight", () => {
-    expect(codes).toHaveLength(8);
+  test("the inventory names all fifteen", () => {
+    expect(codes).toHaveLength(15);
     expect(codes).toContain("conversations.errors.invalid-parent");
+  });
+
+  test("too-many-exports carries the wait, and limitedExport maps a Throttled", async () => {
+    const error = tooManyExports(90);
+    expect(error.extensions["code"]).toBe(
+      "conversations.errors.too-many-exports",
+    );
+    expect(error.extensions["minutes"]).toBe(2);
+    await expect(
+      limitedExport(async () => {
+        throw new Throttled("exports", 90);
+      }),
+    ).rejects.toMatchObject({
+      extensions: { code: "conversations.errors.too-many-exports" },
+    });
   });
 });

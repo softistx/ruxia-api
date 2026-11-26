@@ -8,6 +8,7 @@ import { noStatuses } from "../src/modules/models";
 import { services } from "../src/modules/services";
 import type { AuthApp } from "./auth";
 import { fakeAdapters } from "./conversations";
+import { memoryBucket } from "./media";
 
 // Runs an operation in process, as `viewer`, with the resolvers of /graphql
 // and no HTTP in between.
@@ -35,6 +36,7 @@ export async function executeAs<D, V extends Record<string, unknown>>(
         titleModelId: "claude-haiku-5-5",
         runtime: conversationsRuntime({ maxRunMs: 60_000 }),
         observers: [],
+        media: memoryBucket().bucket,
         now: () => new Date(),
       }),
     },

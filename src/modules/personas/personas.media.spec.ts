@@ -7,7 +7,8 @@ import type { Viewer } from "../../auth/viewer";
 import { appMongo } from "../../config/db";
 import { noMedia } from "../../config/media";
 import { unthrottled } from "../../limits/throttle";
-import { avatarQuota, avatarRoutes } from "./personas.media";
+import { appMedia } from "../media";
+import { avatarQuota } from "./personas.media";
 
 const origin = "https://ui.ruxia.test/media/persona-avatars";
 
@@ -129,7 +130,7 @@ describe("the persona avatars over /media", () => {
     const { bucket, objects } = memoryBucket();
     const kit = authApp(undefined, { media: bucket });
     const ada = await signedInAccount(kit);
-    const failing = avatarRoutes(
+    const failing = appMedia(
       {
         avatars: {
           mayRead: async () => false,
@@ -138,6 +139,7 @@ describe("the persona avatars over /media", () => {
             throw new Error("db down");
           },
         },
+        exports: { mayRead: async () => false },
         throttle: unthrottled,
       },
       bucket,

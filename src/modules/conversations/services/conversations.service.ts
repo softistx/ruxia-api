@@ -3,6 +3,7 @@ import {
   isObjectIdString,
   NotFoundError,
 } from "@softistx/mongo";
+import type { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import type {
@@ -14,18 +15,30 @@ import {
   invalidCursor,
   modelUnavailable,
   notFound,
+  restoreExpired,
+  runInProgress,
 } from "../conversations.errors";
 import type {
   ConversationModels,
   ConversationPersonas,
 } from "../conversations.integrity";
+import { RESTORE_WINDOW_MS } from "../conversations.rules";
 import { isPersonaMissing } from "../conversations.utils";
+import {
+  deleteConversationWrite,
+  restoreConversationWrite,
+} from "../conversations.writes.utils";
 import type { ConversationDocument } from "../models";
+import type { IdleService } from "./idle.service";
 
 type Page = {
   first?: number | null | undefined;
   after?: string | null | undefined;
   filter?: ConversationFilter | null | undefined;
+  // What a search matched (its ids) and the words it was made of, for the
+  // cursor: the search service gives them, a plain list leaves them out.
+  only?: readonly ObjectId[];
+  searched?: string;
 };
 
 // The conversations, for one request: the resolver ran the guard first (a
@@ -38,6 +51,7 @@ export class ConversationsService {
     private readonly personas: ConversationPersonas,
     private readonly viewer: Viewer | null,
     private readonly now: () => Date,
+    private readonly idle: Pick<IdleService, "require">,
   ) {}
 
   // The acting account: reached only past the guards.
@@ -76,37 +90,92 @@ export class ConversationsService {
   }
 
   // The member's conversations, last written first; the empty ones (nothing
-  // said yet) are left out.
+  // said yet) are left out. With `filter.deleted`, the trash instead: the ones
+  // deleted within the 30 days, the latest deletion first.
   async list(args: Page) {
     const personaId = args.filter?.personaId ?? undefined;
     if (personaId !== undefined && !isObjectIdString(personaId)) {
       return toConnection(args.after, { items: [], nextCursor: null }, 0);
     }
+    const trash = args.filter?.deleted === true;
     const filter = {
       ownerId: this.actor,
       activeLeafId: { $ne: null },
+      ...(trash && {
+        deletedAt: { $gte: new Date(this.now().getTime() - RESTORE_WINDOW_MS) },
+        purgingAt: null,
+      }),
       ...(personaId !== undefined && { personaId }),
+      ...(args.only !== undefined && { _id: { $in: [...args.only] } }),
     };
     try {
       const [page, total] = await Promise.all([
         this.conversations.paginateByCursor({
           filter,
-          orderBy: "lastMessageAt",
+          orderBy: trash ? "deletedAt" : "lastMessageAt",
           direction: "desc",
+          withDeleted: trash,
           limit: args.first ?? 20,
           after: args.after,
           scope: cursorScopeOf("conversations", [
             this.actor,
             personaId ?? null,
+            ...(trash ? ["deleted"] : []),
+            ...(args.searched === undefined ? [] : [args.searched]),
           ]),
         }),
-        this.conversations.count(filter),
+        this.conversations.count(filter, { withDeleted: trash }),
       ]);
       return toConnection(args.after, page, total);
     } catch (error) {
       if (error instanceof InvalidCursorError) throw invalidCursor();
       throw error;
     }
+  }
+
+  // Soft-deletes the conversation, refused while an answer is being written
+  // (stop it first). Restorable for 30 days.
+  async delete(id: string) {
+    const conversation = await this.find(id);
+    await this.idle.require(conversation);
+    const { filter, update } = deleteConversationWrite({
+      conversationId: conversation._id,
+      actor: this.actor,
+      at: this.now(),
+    });
+    const done = await this.conversations.raw.updateOne(filter, update);
+    if (done.matchedCount === 0) throw runInProgress();
+    return this.conversations.getById(conversation._id, { withDeleted: true });
+  }
+
+  // Brings a deleted conversation back, within 30 days of its deletion; a
+  // live one is returned as it is. One conditional write: a conversation the
+  // purge has taken, or past the window, is `restore-expired`, and one that is
+  // gone is `not-found`.
+  async restore(id: string) {
+    const found = await this.deleted(id);
+    if (found.deletedAt === null) return found;
+    const { filter, update } = restoreConversationWrite({
+      conversationId: found._id,
+      actor: this.actor,
+      since: new Date(this.now().getTime() - RESTORE_WINDOW_MS),
+      at: this.now(),
+    });
+    const done = await this.conversations.raw.updateOne(filter, update);
+    if (done.matchedCount === 0) {
+      await this.deleted(id);
+      throw restoreExpired();
+    }
+    return this.conversations.getById(found._id);
+  }
+
+  // One of the member's conversations, deleted or not; not-found otherwise.
+  private async deleted(id: string) {
+    const found = isObjectIdString(id)
+      ? await this.conversations.findById(id, { withDeleted: true })
+      : undefined;
+    if (!found || found.ownerId !== this.actor) throw notFound();
+    return found;
   }
 
   // The model the next message goes to: enabled, as at the start.

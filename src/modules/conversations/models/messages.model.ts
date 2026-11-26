@@ -89,8 +89,8 @@ export type MessageUsage = z.infer<typeof messageUsage>;
 // deleted. `contextSummary` is the summary of the path from the root through
 // this message (`@softistx/ai-memory`'s `compact`): the path to a message is
 // unique in the tree, so the summary holds for every branch below it. `cost`
-// is in USD, null when the model's price is unknown. `reactions` and `pinned`
-// are the later slices' and stored as given.
+// is in USD, null when the model's price is unknown. `reactions` holds the
+// owner's emojis (one per emoji).
 export const messages = defineCollection({
   name: "messages",
   schema: z.object({
@@ -118,6 +118,9 @@ export const messages = defineCollection({
       .array(z.object({ userId: accountId, emoji: z.string().max(32) }))
       .default([]),
     pinned: z.boolean().default(false),
+    // The text a member may search: the text parts joined (never the model's
+    // reasoning). Written with the message (a user's) or at the end of a run.
+    searchText: z.string().default(""),
   }),
   timestamps: true,
   optimisticLock: true,
@@ -130,6 +133,16 @@ export const messages = defineCollection({
     {
       key: { ownerId: 1, conversationId: 1, createdAt: 1 },
       name: "messages_owner",
+    },
+    {
+      key: { ownerId: 1, searchText: "text" },
+      name: "messages_search",
+      default_language: "none",
+    },
+    {
+      key: { ownerId: 1, conversationId: 1, createdAt: 1 },
+      name: "messages_pinned",
+      partialFilterExpression: { pinned: true },
     },
     {
       key: { status: 1 },

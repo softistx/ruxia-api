@@ -1,5 +1,6 @@
 import type { Resolvers } from "@/generated/graphql/resolvers";
 import { requireMember } from "../../../auth/guards";
+import { purgeAt } from "../conversations.rules";
 
 // Guards first: every operation is a member's, and the services read only
 // that member's conversations.
@@ -7,7 +8,7 @@ export const conversations: Resolvers = {
   Query: {
     conversations: (_, args, ctx) => {
       requireMember(ctx);
-      return ctx.services.conversations.list(args);
+      return ctx.services.search.list(args);
     },
     conversation: (_, { id }, ctx) => {
       requireMember(ctx);
@@ -23,6 +24,18 @@ export const conversations: Resolvers = {
       requireMember(ctx);
       return ctx.services.conversations.setModel(id, modelId);
     },
+    deleteConversation: (_, { id }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.conversations.delete(id);
+    },
+    restoreConversation: (_, { id }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.conversations.restore(id);
+    },
+    exportConversation: (_, { id, format }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.exports.export(id, format);
+    },
   },
   Conversation: {
     id: (conversation) => String(conversation._id),
@@ -33,6 +46,9 @@ export const conversations: Resolvers = {
       conversation.activeLeafId === null
         ? null
         : String(conversation.activeLeafId),
+    deletedAt: (conversation) => conversation.deletedAt,
+    purgeAt: (conversation) =>
+      conversation.deletedAt === null ? null : purgeAt(conversation.deletedAt),
     messages: (conversation, args, ctx) =>
       ctx.services.messages.page(conversation, args),
   },

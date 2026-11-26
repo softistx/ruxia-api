@@ -58,3 +58,13 @@ export const messageSends = defineRateLimit({
   per: minute,
   burst: 10,
 });
+
+// What a member may export: per account, counted before the file is built
+// (10 an hour, a burst of 3).
+export const conversationExports = defineRateLimit({
+  name: "conversation-exports",
+  key: (p: ViewerParams) => p.viewerId,
+  limit: 10,
+  per: hour,
+  burst: 3,
+});

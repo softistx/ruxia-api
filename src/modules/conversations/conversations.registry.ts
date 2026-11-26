@@ -9,15 +9,20 @@ import type {
   ConversationPersonas,
 } from "./conversations.integrity";
 import type { ConversationsRuntime } from "./conversations.runtime";
+import { BranchesService } from "./services/branches.service";
 import { ConversationsService } from "./services/conversations.service";
+import { type ExportBucket, ExportsService } from "./services/exports.service";
+import { IdleService } from "./services/idle.service";
 import { MessagesService } from "./services/messages.service";
+import { ReactionsService } from "./services/reactions.service";
 import { RunMessagesService } from "./services/run-messages.service";
 import { RunsService } from "./services/runs.service";
+import { SEARCH_CAP, SearchService } from "./services/search.service";
 import { TitlesService } from "./services/titles.service";
 
-// The conversations' services for one request, wired to each other and to the
-// ports the registry hands in (never defaulted). `warn` names its source.
-export function conversationsServices(deps: {
+// What the conversations' services are wired from (the registry passes every
+// port, none is defaulted). `warn` names its source.
+export type ConversationsDeps = {
   mongo: AppMongo;
   viewer: Viewer | null;
   models: ConversationModels;
@@ -28,19 +33,24 @@ export function conversationsServices(deps: {
   observers: readonly AgentObserver[];
   background: Background;
   sends: Throttle["sends"];
+  // The private bucket the exports are stored in.
+  media: ExportBucket;
+  exports: Throttle["exports"];
   warn: (name: string, message: string) => void;
   now: () => Date;
-}) {
+};
+
+// What the services share, built first.
+type Shared = {
+  conversations: ConversationsService;
+  messages: MessagesService;
+  runMessages: RunMessagesService;
+  idle: IdleService;
+};
+
+// The titles and the runs, which need the shared services and the model ports.
+function runServices(deps: ConversationsDeps, shared: Shared) {
   const { mongo, viewer, models, personas, now } = deps;
-  const conversations = new ConversationsService(
-    mongo,
-    models,
-    personas,
-    viewer,
-    now,
-  );
-  const messages = new MessagesService(mongo, viewer, now);
-  const runMessages = new RunMessagesService(mongo, viewer, now);
   const titles = new TitlesService(
     mongo,
     models,
@@ -51,9 +61,7 @@ export function conversationsServices(deps: {
   );
   const runs = new RunsService(
     {
-      conversations,
-      messages,
-      runMessages,
+      ...shared,
       titles,
       models,
       personas,
@@ -67,5 +75,54 @@ export function conversationsServices(deps: {
     },
     viewer,
   );
-  return { conversations, messages, runMessages, titles, runs };
+  return { titles, runs };
+}
+
+// The conversations' services for one request, wired to each other.
+export function conversationsServices(deps: ConversationsDeps) {
+  const { mongo, viewer, models, personas, now } = deps;
+  const messages = new MessagesService(mongo, viewer, now);
+  const runMessages = new RunMessagesService(mongo, viewer, now);
+  const idle = new IdleService(deps.runtime, runMessages);
+  const conversations = new ConversationsService(
+    mongo,
+    models,
+    personas,
+    viewer,
+    now,
+    idle,
+  );
+  const shared = { conversations, messages, runMessages, idle };
+  return {
+    conversations,
+    messages,
+    runMessages,
+    ...runServices(deps, shared),
+    search: new SearchService(mongo, conversations, viewer, SEARCH_CAP),
+    branches: new BranchesService(
+      mongo,
+      conversations,
+      messages,
+      viewer,
+      now,
+      idle,
+    ),
+    reactions: new ReactionsService(
+      mongo,
+      conversations,
+      messages,
+      viewer,
+      now,
+    ),
+    exports: new ExportsService(
+      mongo,
+      conversations,
+      messages,
+      deps.media,
+      deps.exports,
+      viewer,
+      (message) => deps.warn("exports", message),
+      now,
+    ),
+  };
 }

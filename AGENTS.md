@@ -12,6 +12,18 @@ apply here **in full**: every rule of those skills counts as stated in this file
 `conventions-reviewer` counts it, except where a line below departs from it (single
 tenant: no `scoped()` tenancy). Background jobs that keep a module's data current while
 the server runs (such as `models.probe.ts`) are the `reload` role under another name.
+**System jobs**: the boot `sweep` (`sweepRuns`) and the daily `purge`
+(`ConversationsPurge`) are started from `server.ts` only, never by a request or a
+spec (specs call `tick` themselves), through an explicit ticker port that is
+unref'd. They may read and delete across owners (raw, no viewer), because no
+member owns them, but they never expose content: nothing they read is logged,
+returned or mailed beyond ids and counts. The purge takes each conversation by a
+conditional claim (`purgingAt`) that a restore cannot pass.
+
+- **Single-item deletes**: `deleteConversation(id)` and `restoreConversation(id)`
+  return the conversation (an app departure from the bulk form of the stack
+  skills: soft delete with a 30-day restore, one item at a time, the UI needs the
+  entity for its undo).
 
 - **Coordination**: the ruxia session in `~/workspace/dev/ruxia/` coordinates; send it
   status, merges, blockers and owner questions with a recommended option.
@@ -23,7 +35,7 @@ the server runs (such as `models.probe.ts`) are the `reload` role under another 
   memory or projects; no resolver or script exposes them (a leak spec guards it).
 - **AI through `@softistx/ai-*` only**: no provider SDK, no hand-made SSE writer, no
   app-side embeddings or search client. A gap is filed on softistx/ai and the slice waits.
-- **Transports**: `/graphql` is the entry point; `/media` (the persona avatars) and
+- **Transports**: `/graphql` is the entry point; `/media` (the private bucket's `persona-avatars` and `conversation-exports`) and
   `GET /runs/:runId/events` (the SSE stream of a run, spec §1 and §4.5) are the transports
   beside it, through `@softistx/alxia-media` and `@softistx/ai-alxia`. Any other route is
   asked about first.

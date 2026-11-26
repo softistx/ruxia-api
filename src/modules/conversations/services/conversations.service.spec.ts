@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { ObjectId } from "mongodb";
 import { authApp } from "~/auth";
 import { memberOf, sonnet } from "~/conversations";
 import { appMongo } from "../../../config/db";
@@ -203,5 +204,99 @@ describe("ConversationsService: reading", () => {
         filter: { personaId: String(sage._id) },
       }),
     ).rejects.toMatchObject(refused("conversations.errors.invalid-cursor"));
+  });
+});
+
+describe("delete, restore and the trash", () => {
+  test("a deleted conversation is gone from the list and the reads, and restored within 30 days", async () => {
+    const ada = await memberOf(kit);
+    const sage = await persona(ada);
+    const c = await ada.conversations.start({ personaId: String(sage._id) });
+    const id = String(c._id);
+    await said(ada, id, new Date());
+    const deleted = await ada.conversations.delete(id);
+    expect(deleted.deletedAt).toBeInstanceOf(Date);
+    await expect(ada.conversations.find(id)).rejects.toMatchObject(
+      refused("conversations.errors.not-found"),
+    );
+    expect((await ada.conversations.list({})).totalCount).toBe(0);
+    const restored = await ada.conversations.restore(id);
+    expect(restored.deletedAt).toBeNull();
+    expect((await ada.conversations.list({})).totalCount).toBe(1);
+    // A live one is returned as it is.
+    expect((await ada.conversations.restore(id)).deletedAt).toBeNull();
+  });
+
+  test("restore after 30 days is restore-expired, and a purged or foreign one is not-found", async () => {
+    let now = new Date();
+    const ada = await memberOf(kit, { now: () => now });
+    const bea = await memberOf(kit);
+    const sage = await persona(ada);
+    const c = await ada.conversations.start({ personaId: String(sage._id) });
+    const id = String(c._id);
+    await said(ada, id, new Date());
+    await ada.conversations.delete(id);
+    await expect(bea.conversations.restore(id)).rejects.toMatchObject(
+      refused("conversations.errors.not-found"),
+    );
+    now = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    await expect(ada.conversations.restore(id)).rejects.toMatchObject(
+      refused("conversations.errors.restore-expired"),
+    );
+    await appMongo.db.conversations.raw.deleteOne({ _id: c._id });
+    await expect(ada.conversations.restore(id)).rejects.toMatchObject(
+      refused("conversations.errors.not-found"),
+    );
+    await expect(ada.conversations.restore("nope")).rejects.toMatchObject(
+      refused("conversations.errors.not-found"),
+    );
+  });
+
+  test("the trash lists the viewer's restorable ones, the latest deletion first", async () => {
+    let now = new Date();
+    const ada = await memberOf(kit, { now: () => now });
+    const sage = await persona(ada);
+    const made = [];
+    for (let i = 0; i < 3; i += 1) {
+      const c = await ada.conversations.start({ personaId: String(sage._id) });
+      await said(ada, String(c._id), new Date(i * 1000));
+      made.push(c);
+    }
+    for (const c of made) {
+      now = new Date(now.getTime() + 1000);
+      await ada.conversations.delete(String(c._id));
+    }
+    // The oldest was deleted long ago: past the window, no longer in the trash.
+    await appMongo.db.conversations.raw.updateOne(
+      { _id: new ObjectId(String(made[0]?._id)) },
+      { $set: { deletedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000) } },
+    );
+    now = new Date();
+    const trash = await ada.conversations.list({ filter: { deleted: true } });
+    expect(trash.edges.map((edge) => String(edge.node._id))).toEqual([
+      String(made[2]?._id),
+      String(made[1]?._id),
+    ]);
+    expect(trash.totalCount).toBe(2);
+    expect((await ada.conversations.list({})).totalCount).toBe(0);
+  });
+
+  test("a conversation being written is not deleted (stop it first), unlike a stale hold", async () => {
+    const ada = await memberOf(kit);
+    const sage = await persona(ada);
+    const c = await ada.conversations.start({ personaId: String(sage._id) });
+    const id = String(c._id);
+    await said(ada, id, new Date());
+    const held = String(new ObjectId());
+    await appMongo.db.conversations.raw.updateOne(
+      { _id: c._id },
+      { $set: { activeRunId: held } },
+    );
+    ada.runtime.claim(held);
+    await expect(ada.conversations.delete(id)).rejects.toMatchObject(
+      refused("conversations.errors.run-in-progress"),
+    );
+    ada.runtime.unclaim(held);
+    expect((await ada.conversations.delete(id)).deletedAt).toBeInstanceOf(Date);
   });
 });

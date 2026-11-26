@@ -31,6 +31,8 @@ export const conversations = defineCollection({
     modelId: z.string().min(1).max(200),
     title: z.string().max(120).nullable().default(null),
     pinned: z.boolean().default(false),
+    // Set by the purge when it takes the conversation: a restore then misses.
+    purgingAt: z.date().nullable().default(null),
     archivedAt: z.date().nullable().default(null),
     lastMessageAt: z.date(),
     activeLeafId: objectId().nullable().default(null),
@@ -49,6 +51,21 @@ export const conversations = defineCollection({
     {
       key: { ownerId: 1, personaId: 1, lastMessageAt: -1, _id: -1 },
       name: "conversations_owner_persona",
+    },
+    {
+      key: { ownerId: 1, title: "text" },
+      name: "conversations_search",
+      default_language: "none",
+    },
+    {
+      key: { ownerId: 1, deletedAt: -1 },
+      name: "conversations_trash",
+      partialFilterExpression: { deletedAt: { $type: "date" } },
+    },
+    {
+      key: { deletedAt: 1 },
+      name: "conversations_deleted",
+      partialFilterExpression: { deletedAt: { $type: "date" } },
     },
     {
       key: { activeRunId: 1 },

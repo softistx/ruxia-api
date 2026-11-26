@@ -44,6 +44,10 @@ type Conversation {
     "The `endCursor` of the previous page."
     after: String @constraint(maxLength: 500)
   ): MessageConnection!
+  "When it was deleted (restorable for 30 days); null while it is live."
+  deletedAt: DateTime
+  "When it will be purged for good (30 days after it was deleted); null while it is live."
+  purgeAt: DateTime
   "When it was created."
   createdAt: DateTime!
   "When it last changed."
@@ -72,6 +76,27 @@ type ConversationConnection {
 input ConversationFilter {
   "Only the conversations held with this persona."
   personaId: ID @constraint(maxLength: 64)
+  """
+  Only the conversations whose title or messages contain every word, in the same title or message (full-text,
+  case and accents ignored, whole words). Operators are never interpreted; the
+  text is cut at 100 characters and 8 words; nothing searchable left means no
+  narrowing.
+  """
+  search: String @constraint(maxLength: 500)
+  """
+  True lists the trash instead: the member's conversations deleted less than
+  30 days ago (restorable), the latest deletion first. A search does not apply
+  to it. False or left out lists the live ones.
+  """
+  deleted: Boolean
+}
+
+"How an export is written."
+enum ExportFormat {
+  "The branch shown, as Markdown."
+  MARKDOWN
+  "The whole tree, every branch, as JSON."
+  JSON
 }
 
 "The conversation to start."
@@ -131,4 +156,43 @@ extend type Mutation {
     "The model the next message goes to."
     modelId: String! @constraint(minLength: 1, maxLength: 200)
   ): Conversation!
+
+  """
+  Soft-deletes one of the member's conversations; it can be restored for 30
+  days, then it is purged with its messages and exports. 404
+  `conversations.errors.not-found`; 409 `conversations.errors.run-in-progress`
+  while an answer is being written (stop it first).
+  """
+  deleteConversation(
+    "The conversation's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Conversation!
+
+  """
+  Brings back a conversation deleted less than 30 days ago (a live one is
+  returned as it is). 404 `conversations.errors.not-found`; 409
+  `conversations.errors.restore-expired`.
+  """
+  restoreConversation(
+    "The conversation's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Conversation!
+
+  """
+  Stores the conversation as a file and returns its media key: the branch shown
+  for MARKDOWN, the whole tree for JSON. Download it at
+  `/media/conversation-exports/<key>` (the owner alone, while the conversation
+  is live). A newer export of the same conversation and format replaces the
+  previous file, so the previous key stops working: download at once. 404
+  `conversations.errors.not-found` for an unknown, foreign or deleted
+  conversation; 429 `conversations.errors.too-many-exports` past 10 exports an
+  hour (burst 3); 503 `auth.errors.unavailable` when the file cannot be
+  stored.
+  """
+  exportConversation(
+    "The conversation's id."
+    id: ID! @constraint(maxLength: 64)
+    "The format."
+    format: ExportFormat!
+  ): String!
 }

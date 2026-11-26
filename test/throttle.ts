@@ -26,6 +26,7 @@ export function countingThrottle({
   const counts = new Map<ClientFamily, number>();
   let uploads = 0;
   let sends = 0;
+  let exports = 0;
   return {
     client: (ip) => {
       ips.push(ip);
@@ -42,6 +43,10 @@ export function countingThrottle({
     sends: () => async () => {
       sends += 1;
       if (sends > after) throw new Throttled("sends", retryAfter);
+    },
+    exports: () => async () => {
+      exports += 1;
+      if (exports > after) throw new Throttled("exports", retryAfter);
     },
     uploadCalls: () => uploads,
     sendCalls: () => sends,

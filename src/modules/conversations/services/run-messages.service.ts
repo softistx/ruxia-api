@@ -28,17 +28,16 @@ export interface Finish {
   errorCode: string | null;
 }
 
-// What a send writes: the member's text under `parentId`, and the reply whose
-// id is the run's.
-export interface Exchange {
+// What a send writes: the member's text under `parentId` (or, for a
+// regenerate, the member's message that already exists), and the reply whose id
+// is the run's.
+export type Exchange = {
   conversation: ConversationDocument;
-  parentId: ObjectId | null;
-  text: string;
   modelId: string;
   // The run's id, made by the send before it claims the run; made here when
   // left out.
   assistantId?: ObjectId;
-}
+} & ({ parentId: ObjectId | null; text: string } | { user: MessageDocument });
 
 // The transaction a write runs in.
 type Tx = Parameters<
@@ -89,6 +88,7 @@ export class RunMessagesService {
             conversationId: input.conversation._id,
             actor: this.actor,
             assistantId,
+            modelId: input.modelId,
             at,
           });
           const taken = await tx.db.conversations.raw.updateOne(
@@ -171,22 +171,25 @@ export class RunMessagesService {
   }
 
   private async createPair(tx: Tx, input: Exchange, assistantId: ObjectId) {
-    const { conversation, parentId, text, modelId } = input;
-    const userId = new ObjectId();
-    const user = await tx.db.messages.create({
-      _id: userId,
-      ownerId: this.actor,
-      conversationId: conversation._id,
-      parentId,
-      role: "user",
-      parts: [{ type: "text", text }],
-      status: "done",
-    });
+    const { conversation, modelId } = input;
+    const user =
+      "user" in input
+        ? input.user
+        : await tx.db.messages.create({
+            _id: new ObjectId(),
+            ownerId: this.actor,
+            conversationId: conversation._id,
+            parentId: input.parentId,
+            role: "user",
+            parts: [{ type: "text", text: input.text }],
+            searchText: input.text,
+            status: "done",
+          });
     const assistant = await tx.db.messages.create({
       _id: assistantId,
       ownerId: this.actor,
       conversationId: conversation._id,
-      parentId: userId,
+      parentId: user._id,
       role: "assistant",
       modelId,
       status: "streaming",
