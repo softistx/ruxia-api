@@ -2,6 +2,7 @@ import { ConflictError } from "@softistx/mongo";
 import type { Viewer } from "../../auth/viewer";
 import type { AppMongo } from "../../config/db";
 import type { Background } from "../../shared/background";
+import { monthOf, windowOf } from "../../shared/months";
 import { exhausted } from "./budgets.errors";
 import type {
   AlertHook,
@@ -15,9 +16,7 @@ import {
   isAlerting,
   isExhausted,
   isPaid,
-  monthOf,
   percentOf,
-  windowOf,
 } from "./budgets.rules";
 import { alertMail, perMember, perModel, totalOf } from "./budgets.utils";
 
@@ -90,7 +89,7 @@ export class BudgetsService {
   private async figures(memberId: string, month: string) {
     const window = windowOf(month);
     const [rows, budgetUsd] = await Promise.all([
-      this.deps.spend.ofMember(memberId, window),
+      this.deps.spend.ofMember(memberId, month),
       this.budgetOf(memberId),
     ]);
     const total = totalOf(rows);
@@ -148,7 +147,7 @@ export class BudgetsService {
   async teamUsage(month?: string | null) {
     const asked = month ?? monthOf(this.deps.now());
     const [rows, roster, own, defaultBudgetUsd] = await Promise.all([
-      this.deps.spend.ofTeam(windowOf(asked)),
+      this.deps.spend.ofTeam(asked),
       this.deps.members.roster(),
       this.deps.mongo.db.memberBudgets.findMany({}),
       this.defaultBudget(),
@@ -194,21 +193,24 @@ export class BudgetsService {
     });
   }
 
-  // After a run ended: raises the member's 80 % alert for the month, once. The
-  // alert is recorded first (its unique index lets one of several runs that end
-  // together win), then the mail is prepared and sent in the background, and
-  // the push hook is called; the in-app notice is the record itself.
-  async checkAlert(memberId: string) {
-    const now = this.deps.now();
+  // After a run ended: raises the member's 80 % alert for the month the run
+  // counts in (`at` is its assistant message's creation, so a run that crossed
+  // midnight on the 1st is checked in the month it was spent in), once. The
+  // member is read and the mail built first; then the alert is recorded, and
+  // its unique index is the one-winner gate: only the run that records it
+  // sends. The mail and the push hook go out in the background; a failed send
+  // is logged and not retried (the alert stays recorded, so it is never sent
+  // twice), and the in-app notice is the record itself.
+  async checkAlert(memberId: string, at: Date) {
+    const month = monthOf(at);
     const { total, window, budgetUsd, percent } = await this.figures(
       memberId,
-      monthOf(now),
+      month,
     );
     if (!isAlerting(total.spentUsd, budgetUsd)) return;
-    if (!(await this.record(memberId, now, total.spentUsd, budgetUsd))) return;
     const alert: BudgetAlert = {
       memberId,
-      month: monthOf(now),
+      month,
       spentUsd: total.spentUsd,
       budgetUsd,
       percent,
@@ -216,25 +218,21 @@ export class BudgetsService {
     };
     const member = await this.deps.members.find(memberId);
     const message = alertMail(member, alert, this.deps.mail.from);
+    if (!(await this.record(alert, this.deps.now()))) return;
     const { background, mail, onAlert } = this.deps;
     background.run("budget alert mail", () => mail.mailer.send(message));
     background.run("budget alert push", () => onAlert(alert));
   }
 
   // Writes the month's alert; false when it already exists.
-  private async record(
-    memberId: string,
-    now: Date,
-    spentUsd: number,
-    budgetUsd: number,
-  ): Promise<boolean> {
+  private async record(alert: BudgetAlert, now: Date): Promise<boolean> {
     try {
-      await this.deps.mongo.as(memberId).db.budgetAlerts.create({
-        memberId,
-        month: monthOf(now),
+      await this.deps.mongo.as(alert.memberId).db.budgetAlerts.create({
+        memberId: alert.memberId,
+        month: alert.month,
         alertedAt: now,
-        spentUsd,
-        budgetUsd,
+        spentUsd: alert.spentUsd,
+        budgetUsd: alert.budgetUsd,
       });
       return true;
     } catch (error) {

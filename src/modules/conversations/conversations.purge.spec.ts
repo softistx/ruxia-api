@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { mediaObjectKey } from "@softistx/alxia-media";
 import { ObjectId } from "mongodb";
 import { authApp } from "~/auth";
+import { clearBudgets } from "~/budgets";
 import { ask, memberOf, scripted, startedBy } from "~/conversations";
 import { memoryBucket } from "~/media";
 import { appMongo } from "../../config/db";
@@ -56,6 +57,31 @@ const live = (id: ObjectId) =>
   appMongo.db.conversations.raw.findOne({ _id: id });
 
 describe("ConversationsPurge", () => {
+  test("the member's spend survives the purge of the conversations behind it", async () => {
+    await clearBudgets();
+    const { bucket } = memoryBucket();
+    const ada = await memberOf(kit, {
+      adapters: scripted("a"),
+      media: bucket,
+    });
+    const old = await deletedAgo(ada, RESTORE_WINDOW_MS + day);
+    const before = await appMongo.db.spend.raw
+      .find({ ownerId: ada.id })
+      .toArray();
+    expect(before).toHaveLength(1);
+    expect(before[0]?.costUsd).toBeGreaterThan(0);
+    expect(await purgeOf({ media: bucket }).tick()).toBeGreaterThanOrEqual(1);
+    expect(await live(old)).toBeNull();
+    expect(
+      await appMongo.db.messages.raw.countDocuments({ ownerId: ada.id }),
+    ).toBe(0);
+    const after = await appMongo.db.spend.raw
+      .find({ ownerId: ada.id })
+      .toArray();
+    expect(after).toEqual(before);
+    expect((await ada.budgets.usage()).spentUsd).toBeGreaterThan(0);
+  });
+
   test("hard-deletes what was deleted more than 30 days ago, with messages and exports", async () => {
     const { bucket, objects } = memoryBucket();
     const ada = await memberOf(kit, {

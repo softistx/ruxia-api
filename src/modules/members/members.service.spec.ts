@@ -42,6 +42,20 @@ describe("MembersService", () => {
     ]);
   });
 
+  test("roster lists every member's id and name, and nothing else", async () => {
+    const kit = authApp();
+    const admin = await signedInAccount(kit, { role: "admin", name: "Nora" });
+    const bea = await signedInAccount(kit, { name: "Bea" });
+    const service = await serviceOf(kit, admin.token);
+    const roster = await service.roster();
+    expect(roster).toContainEqual({ id: admin.userId, name: "Nora" });
+    expect(roster).toContainEqual({ id: bea.userId, name: "Bea" });
+    for (const line of roster) {
+      expect(Object.keys(line).sort()).toEqual(["id", "name"]);
+    }
+    expect(roster).toHaveLength(await appMongo.db.members.count());
+  });
+
   test("an unknown id is not-found and a foreign cursor is refused", async () => {
     const kit = authApp();
     const admin = await signedInAccount(kit, { role: "admin" });

@@ -69,8 +69,6 @@ type MemberOptions = {
   // The bucket the exports go to (a memory one by default).
   media?: ExportBucket;
   exports?: Throttle["exports"];
-  // Where an 80 % budget alert goes besides the mail (the push, slice 14).
-  onAlert?: AlertHook;
   // The Ollama probe's cached answer (none: Ollama is offline).
   statuses?: StatusStore;
 };
@@ -123,6 +121,8 @@ function servicesOfMember(
   kit: Kit,
   options: MemberOptions,
   viewer: SessionViewer,
+  // Where an 80 % budget alert goes besides the mail (the push, slice 14).
+  onAlert: AlertHook,
 ) {
   const core = coreOf(kit, options, viewer);
   const { conversations, messages, idle, now } = core;
@@ -145,7 +145,7 @@ function servicesOfMember(
       members: new MembersService(appMongo, kit.auth, viewer),
       mail: { mailer: kit.auth.mailer, from: kit.auth.from },
       background: kit.auth.background,
-      onAlert: options.onAlert ?? noPush,
+      onAlert,
       now,
     },
     viewer,
@@ -206,15 +206,25 @@ function servicesOfMember(
   };
 }
 
-// A member's conversation services for specs, over a real account.
-export async function memberOf(kit: Kit, options: MemberOptions = {}) {
+// A member's conversation services for specs, over a real account, whose
+// budget alerts go to no push (`noPush`).
+export function memberOf(kit: Kit, options: MemberOptions = {}) {
+  return memberAlertedTo(kit, noPush, options);
+}
+
+// The same, with the hook budget alerts are announced to (the push's place).
+export async function memberAlertedTo(
+  kit: Kit,
+  onAlert: AlertHook,
+  options: MemberOptions = {},
+) {
   const account = await signedInAccount(kit, options);
   const viewer = await sessionViewer(kit, account.token);
   return {
     id: account.userId,
     token: account.token,
     viewer,
-    ...servicesOfMember(kit, options, viewer),
+    ...servicesOfMember(kit, options, viewer, onAlert),
   };
 }
 

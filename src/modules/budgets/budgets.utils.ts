@@ -1,8 +1,9 @@
 import type { Address, MailMessage } from "@softistx/mail";
 import { escapeHtml } from "../../mail/escape";
+import { TIME_ZONE } from "../../shared/months";
 import type { SpendRow } from "../conversations/services/spend.service";
 import type { BudgetAlert } from "./budgets.integrity";
-import { roundUsd, TIME_ZONE } from "./budgets.rules";
+import { roundUsd } from "./budgets.rules";
 
 // The figures of a set of rows, as the GraphQL types show them.
 export type SpendFigures = {
@@ -46,7 +47,7 @@ export function totalOf(rows: readonly SpendRow[]): SpendFigures {
 
 // The rows of every member folded into one line per model, the dearest first.
 export function perModel(rows: readonly SpendRow[]): ModelFigures[] {
-  const byModel = Map.groupBy(rows, (row) => row.modelId ?? "unknown");
+  const byModel = Map.groupBy(rows, (row) => row.modelId);
   return [...byModel]
     .map(([modelId, own]) => ({ modelId, ...totalOf(own) }))
     .sort(
@@ -80,9 +81,9 @@ const day = (locale: Locale, at: Date) =>
 const WORDS = {
   fr: {
     subject: (percent: number) =>
-      `Vous avez utilisé ${percent} % de votre budget mensuel`,
+      `Vous avez utilisé ${percent}\u202f% de votre budget mensuel`,
     body: (name: string, spent: string, budget: string, reset: string) =>
-      `Bonjour ${name},\n\nVous avez dépensé ${spent} sur votre budget de ${budget} ce mois-ci. À 100 %, l'envoi vers les modèles payants est suspendu jusqu'au ${reset}; les modèles locaux restent disponibles.\n\nUn administrateur peut relever votre budget.`,
+      `Bonjour ${name},\n\nVous avez dépensé ${spent} sur votre budget de ${budget} ce mois-ci. À 100\u202f%, l'envoi vers les modèles payants est suspendu jusqu'au ${reset} ; les modèles locaux restent disponibles.\n\nUn administrateur peut relever votre budget.`,
   },
   en: {
     subject: (percent: number) =>

@@ -9,6 +9,7 @@ import {
   endMessage,
   failMessage,
   freeConversation,
+  spendIncrement,
   takeConversation,
 } from "../conversations.writes.utils";
 import type {
@@ -97,7 +98,7 @@ export class RunMessagesService {
             tx.session === undefined ? {} : { session: tx.session },
           );
           if (taken.matchedCount === 0) throw runInProgress();
-          return this.createPair(tx, input, assistantId);
+          return this.createPair(tx, input, assistantId, at);
         }),
       exhausted,
     );
@@ -105,7 +106,8 @@ export class RunMessagesService {
 
   // Ends a streaming message, once: false when something else did first. On
   // success the conversation is released (`activeRunId` null, `lastMessageAt`
-  // moved to the end of the answer) in the same transaction.
+  // moved to the end of the answer) and the message's cost and usage are added
+  // to the spend ledger, in the same transaction.
   async finalise(
     message: Pick<MessageDocument, "_id" | "conversationId">,
     end: Finish,
@@ -117,12 +119,25 @@ export class RunMessagesService {
           const options =
             tx.session === undefined ? {} : { session: tx.session };
           const done = endMessage(message, end, this.actor, at);
-          const ended = await tx.db.messages.raw.updateOne(
+          const ended = await tx.db.messages.raw.findOneAndUpdate(
             done.filter,
             done.update,
-            options,
+            {
+              ...options,
+              returnDocument: "after",
+              projection: { ownerId: 1, modelId: 1, createdAt: 1 },
+            },
           );
-          if (ended.matchedCount === 0) return false;
+          if (ended === null) return false;
+          // The message's figures join the spend ledger in the same
+          // transaction, so the spend counts it once and survives a purge.
+          const added = spendIncrement(ended, end, at);
+          if (added !== null) {
+            await tx.db.spend.raw.updateOne(added.filter, added.update, {
+              ...options,
+              upsert: true,
+            });
+          }
           const freed = freeConversation({
             conversationId: message.conversationId,
             runId: String(message._id),
@@ -170,7 +185,12 @@ export class RunMessagesService {
     return ended.matchedCount + free.matchedCount > 0;
   }
 
-  private async createPair(tx: Tx, input: Exchange, assistantId: ObjectId) {
+  private async createPair(
+    tx: Tx,
+    input: Exchange,
+    assistantId: ObjectId,
+    at: Date,
+  ) {
     const { conversation, modelId } = input;
     const user =
       "user" in input
@@ -184,6 +204,7 @@ export class RunMessagesService {
             parts: [{ type: "text", text: input.text }],
             searchText: input.text,
             status: "done",
+            createdAt: at,
           });
     const assistant = await tx.db.messages.create({
       _id: assistantId,
@@ -193,6 +214,7 @@ export class RunMessagesService {
       role: "assistant",
       modelId,
       status: "streaming",
+      createdAt: at,
     });
     return { user, assistant };
   }

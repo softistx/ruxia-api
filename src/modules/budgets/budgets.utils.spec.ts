@@ -34,7 +34,7 @@ describe("totals", () => {
       row({ ownerId: "a", modelId: "m1", costUsd: 1 }),
       row({ ownerId: "b", modelId: "m1", costUsd: 2 }),
       row({ ownerId: "a", modelId: "m2", costUsd: 5 }),
-      row({ ownerId: "a", modelId: null, costUsd: 0 }),
+      row({ ownerId: "a", modelId: "unknown", costUsd: 0 }),
     ]);
     expect(lines.map((line) => [line.modelId, line.spentUsd])).toEqual([
       ["m2", 5],
@@ -71,7 +71,7 @@ describe("alertMail", () => {
       alert,
       from,
     );
-    expect(mail.subject).toContain("80 %");
+    expect(mail.subject).toContain("80\u202f%");
     expect(mail.text).toMatch(/1(er)? décembre 2026/);
     expect(mail.text).toMatch(/16,00\s\$/);
     expect(mail.to).toEqual({ name: "Ada <b>", address: "ada@ruxia.test" });

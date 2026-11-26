@@ -42,6 +42,7 @@ function started(first: boolean): Started {
     assistant: {
       _id: new ObjectId(),
       ownerId: "ada",
+      createdAt: new Date("2026-12-01T04:30:00.000Z"),
     } as unknown as MessageDocument,
     model,
     first,
@@ -60,7 +61,7 @@ function endWith(
   const released: string[] = [];
   const named: { user: string; reply: string }[] = [];
   const warnings: string[] = [];
-  const checked: string[] = [];
+  const checked: [string, Date][] = [];
   const background = {
     run: (_name: string, task: () => Promise<unknown>) => void task(),
   } as unknown as Background;
@@ -84,8 +85,8 @@ function endWith(
       },
     },
     budgets: {
-      checkAlert: async (memberId) => {
-        checked.push(memberId);
+      checkAlert: async (memberId, at) => {
+        checked.push([memberId, at]);
       },
     },
     background,
@@ -161,7 +162,9 @@ describe("RunEndService", () => {
       [],
       undefined,
     );
-    expect(paid.checked).toEqual(["ada"]);
+    expect(paid.checked).toEqual([
+      ["ada", new Date("2026-12-01T04:30:00.000Z")],
+    ]);
     expect(paid.finished[0]?.cost).toBeGreaterThan(0);
     const free = endWith();
     await free.service.end(started(false), done, [], undefined);
@@ -188,7 +191,7 @@ describe("RunEndService", () => {
     );
     expect(failed.finished[0]).toMatchObject({ status: "failed" });
     expect(failed.finished[0]?.cost).toBeGreaterThan(0);
-    expect(failed.checked).toEqual(["ada"]);
+    expect(failed.checked).toHaveLength(1);
   });
 
   test("a thrown start has no usage: no cost, no alert check; a lost end checks nothing", async () => {

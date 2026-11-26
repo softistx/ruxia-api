@@ -176,4 +176,20 @@ describe("the send stop", () => {
     expect((await ada.budgets.status()).alertedAt).not.toBeNull();
     expect(await appMongo.db.budgetAlerts.raw.countDocuments({})).toBe(1);
   });
+
+  test("a real run under a clock set in a past month is spent in that month", async () => {
+    const past = new Date("2026-03-15T15:00:00.000Z");
+    const ada = await memberOf(kit, {
+      adapters: answers("Hi"),
+      now: () => past,
+    });
+    const id = await startedBy(ada);
+    const sent = await ada.runs.send({ conversationId: id, text: "Hi" });
+    await ada.runtime.settled(sent.runId);
+    await kit.auth.background.settled();
+    expect((await ada.runMessages.ofRun(sent.runId))?.createdAt).toEqual(past);
+    expect((await ada.budgets.usage("2026-03")).spentUsd).toBeGreaterThan(0);
+    expect((await ada.budgets.usage("2026-04")).spentUsd).toBe(0);
+    expect((await ada.budgets.status()).month).toBe("2026-03");
+  });
 });

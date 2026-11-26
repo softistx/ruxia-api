@@ -4,6 +4,7 @@ import {
   endMessage,
   failMessage,
   freeConversation,
+  spendIncrement,
   takeConversation,
 } from "./conversations.writes.utils";
 
@@ -59,4 +60,42 @@ test("freeing a conversation moves lastMessageAt only for an ended answer", () =
   expect(free(true).update.$set).toMatchObject({ lastMessageAt: at });
   expect(free(false).update.$set).not.toHaveProperty("lastMessageAt");
   expect(free(false).filter).toMatchObject({ activeRunId: String(messageId) });
+});
+
+test("spendIncrement keys the ledger by owner, Toronto month of creation and model", () => {
+  const usage = {
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: 1,
+    cacheWriteTokens: 2,
+    webSearches: 3,
+  };
+  const message = {
+    ownerId: "ada",
+    modelId: "claude-sonnet-5-5",
+    createdAt: new Date("2026-12-01T04:30:00Z"),
+  };
+  const added = spendIncrement(message, { usage, cost: 0.5 }, at);
+  expect(added?.filter).toEqual({
+    ownerId: "ada",
+    month: "2026-11",
+    modelId: "claude-sonnet-5-5",
+  });
+  expect(added?.update.$inc).toEqual({
+    costUsd: 0.5,
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: 1,
+    cacheWriteTokens: 2,
+    webSearches: 3,
+    messages: 1,
+  });
+  const unpriced = spendIncrement(
+    { ...message, modelId: null },
+    { usage, cost: null },
+    at,
+  );
+  expect(unpriced?.filter.modelId).toBe("unknown");
+  expect(unpriced?.update.$inc.costUsd).toBe(0);
+  expect(spendIncrement(message, { usage: null, cost: null }, at)).toBeNull();
 });

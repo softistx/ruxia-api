@@ -1,13 +1,11 @@
 import type { AppMongo } from "../../../config/db";
 
-// The period a spend is summed over: `start` included, `end` excluded.
-export type SpendWindow = { start: Date; end: Date };
-
-// What the assistant messages of one member and one model cost in a window:
-// figures only, never content. `modelId` is null for a reply with none.
+// What the assistant messages of one member and one model cost in a month:
+// figures only, never content. `modelId` is "unknown" for a reply that named
+// none.
 export type SpendRow = {
   ownerId: string;
-  modelId: string | null;
+  modelId: string;
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
@@ -17,60 +15,44 @@ export type SpendRow = {
   messages: number;
 };
 
-// The budgets' read of the messages (docs/spec.md, section 4.12): the cost and
-// the tokens of the assistant messages created in a window, grouped by member
-// and model by one aggregate over the `messages_spend` indexes. It reads the
-// `ownerId`, `modelId`, `cost` and `usage` of a message and never its parts.
-// The budgets module reaches it through its `MessageSpend` port.
+// The budgets' read of the spend ledger (docs/spec.md, section 4.12): a month
+// of one member or of the team, a row per member and model. The ledger is
+// written when a run's message ends (`RunMessagesService.finalise`) and is
+// never touched by the purge, so a spend does not shrink when conversations
+// are deleted. The budgets module reaches it through its `MessageSpend` port.
 export class SpendService {
   constructor(private readonly mongo: AppMongo) {}
 
-  // One member's spend, a row per model.
-  ofMember(ownerId: string, window: SpendWindow): Promise<SpendRow[]> {
-    return this.rows({ ownerId }, window);
+  // One member's spend in `month` (`YYYY-MM`, Toronto), a row per model.
+  ofMember(ownerId: string, month: string): Promise<SpendRow[]> {
+    return this.rows({ ownerId, month });
   }
 
-  // Every member's spend, a row per member and model.
-  ofTeam(window: SpendWindow): Promise<SpendRow[]> {
-    return this.rows({}, window);
+  // Every member's spend in `month`, a row per member and model.
+  ofTeam(month: string): Promise<SpendRow[]> {
+    return this.rows({ month });
   }
 
-  private async rows(
-    scope: { ownerId?: string },
-    window: SpendWindow,
-  ): Promise<SpendRow[]> {
-    const grouped = await this.mongo.db.messages.raw
-      .aggregate<{
-        _id: { ownerId: string; modelId: string | null };
-        costUsd: number;
-        inputTokens: number;
-        outputTokens: number;
-        cacheReadTokens: number;
-        cacheWriteTokens: number;
-        webSearches: number;
-        messages: number;
-      }>([
-        {
-          $match: {
-            ...scope,
-            role: "assistant",
-            createdAt: { $gte: window.start, $lt: window.end },
-          },
+  private async rows(filter: {
+    ownerId?: string;
+    month: string;
+  }): Promise<SpendRow[]> {
+    const found = await this.mongo.db.spend.raw
+      .find(filter, {
+        projection: {
+          _id: 0,
+          ownerId: 1,
+          modelId: 1,
+          costUsd: 1,
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 1,
+          cacheWriteTokens: 1,
+          webSearches: 1,
+          messages: 1,
         },
-        {
-          $group: {
-            _id: { ownerId: "$ownerId", modelId: "$modelId" },
-            costUsd: { $sum: "$cost" },
-            inputTokens: { $sum: "$usage.inputTokens" },
-            outputTokens: { $sum: "$usage.outputTokens" },
-            cacheReadTokens: { $sum: "$usage.cacheReadTokens" },
-            cacheWriteTokens: { $sum: "$usage.cacheWriteTokens" },
-            webSearches: { $sum: "$usage.webSearches" },
-            messages: { $sum: 1 },
-          },
-        },
-      ])
+      })
       .toArray();
-    return grouped.map(({ _id, ...figures }) => ({ ...figures, ..._id }));
+    return found as SpendRow[];
   }
 }

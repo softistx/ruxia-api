@@ -68,8 +68,10 @@ export class RunEndService {
       // background, so it never slows or fails the run's end. A free reply
       // (cost 0) or one of unknown price (null) cannot raise it.
       if (ended && (finish.cost ?? 0) > 0) {
-        const ownerId = exchange.assistant.ownerId;
-        background.run("budget alert", () => budgets.checkAlert(ownerId));
+        const { ownerId, createdAt } = exchange.assistant;
+        background.run("budget alert", () =>
+          budgets.checkAlert(ownerId, createdAt),
+        );
       }
       if (ended && exchange.first && finish.status === "done") {
         const reply = joinedText(finish.parts);

@@ -5,30 +5,21 @@ import { memberOf } from "~/conversations";
 import { appMongo } from "../../../config/db";
 import { SpendService } from "./spend.service";
 
-const window = {
-  start: new Date("2026-11-01T04:00:00.000Z"),
-  end: new Date("2026-12-01T05:00:00.000Z"),
-};
 const service = new SpendService(appMongo);
+const november = new Date("2026-11-10T12:00:00.000Z");
 
-beforeEach(async () => {
-  await appMongo.db.messages.raw.deleteMany({});
-  await clearBudgets();
-});
+beforeEach(clearBudgets);
 
 describe("SpendService", () => {
-  test("sums a member's assistant costs per model inside the window only", async () => {
+  test("reads a member's month from the ledger, a row per model, and no other month", async () => {
     const ada = await memberOf(authApp());
     const bea = await memberOf(authApp());
-    const at = new Date("2026-11-10T12:00:00.000Z");
-    await spent(ada.id, { cost: 0.5, at });
-    await spent(ada.id, { cost: 0.25, at });
-    await spent(ada.id, { cost: 2, at, modelId: "claude-opus-5-5" });
+    await spent(ada.id, { cost: 0.5, at: november });
+    await spent(ada.id, { cost: 0.25, at: november });
+    await spent(ada.id, { cost: 2, at: november, modelId: "claude-opus-5-5" });
     await spent(ada.id, { cost: 9, at: new Date("2026-10-31T23:00:00.000Z") });
-    await spent(ada.id, { cost: 9, at: window.end });
-    await spent(ada.id, { cost: 9, at, role: "user" });
-    await spent(bea.id, { cost: 7, at });
-    const rows = await service.ofMember(ada.id, window);
+    await spent(bea.id, { cost: 7, at: november });
+    const rows = await service.ofMember(ada.id, "2026-11");
     const byModel = Object.fromEntries(rows.map((row) => [row.modelId, row]));
     expect(byModel["claude-sonnet-5-5"]).toMatchObject({
       ownerId: ada.id,
@@ -41,20 +32,12 @@ describe("SpendService", () => {
     expect(rows).toHaveLength(2);
   });
 
-  test("a reply of unknown price (null cost) counts its tokens, not money", async () => {
-    const ada = await memberOf(authApp());
-    await spent(ada.id, { cost: null, at: window.start });
-    const [row] = await service.ofMember(ada.id, window);
-    expect(row).toMatchObject({ costUsd: 0, messages: 1, inputTokens: 100 });
-  });
-
-  test("the team's spend is a row per member and model, and reads no content", async () => {
+  test("the team's month is a row per member and model, figures only", async () => {
     const ada = await memberOf(authApp());
     const bea = await memberOf(authApp());
-    const at = new Date("2026-11-10T12:00:00.000Z");
-    await spent(ada.id, { cost: 1, at });
-    await spent(bea.id, { cost: 2, at });
-    const rows = await service.ofTeam(window);
+    await spent(ada.id, { cost: 1, at: november });
+    await spent(bea.id, { cost: 2, at: november });
+    const rows = await service.ofTeam("2026-11");
     expect(rows.map((row) => row.ownerId).sort()).toEqual(
       [ada.id, bea.id].sort(),
     );
@@ -71,5 +54,6 @@ describe("SpendService", () => {
         "webSearches",
       ]);
     }
+    expect(await service.ofTeam("2026-09")).toEqual([]);
   });
 });

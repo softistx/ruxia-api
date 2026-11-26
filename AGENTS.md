@@ -18,7 +18,11 @@ spec (specs call `tick` themselves), through an explicit ticker port that is
 unref'd. They may read and delete across owners (raw, no viewer), because no
 member owns them, but they never expose content: nothing they read is logged,
 returned or mailed beyond ids and counts. The purge takes each conversation by a
-conditional claim (`purgingAt`) that a restore cannot pass.
+conditional claim (`purgingAt`) that a restore cannot pass. The purge never touches
+`spend` (the figures ledger that budgets read).
+The **budget alert** is a background notice, not a ticker job: it runs after a run's end
+without a request viewer, writes only `budgetAlerts`, and mails the member through
+`auth.mailer` in the background (a failed send is logged, never retried).
 
 - **Single-item deletes**: `deleteConversation(id)` and `restoreConversation(id)`
   return the conversation (an app departure from the bulk form of the stack

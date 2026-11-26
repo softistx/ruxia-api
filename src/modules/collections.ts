@@ -14,6 +14,7 @@ export {
   conversationExports,
   conversations,
   messages,
+  spend,
 } from "./conversations/models";
 export { members } from "./members/members.model";
 export { models } from "./models/models.model";

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { authApp, sentTo } from "~/auth";
 import { clearBudgets, spent } from "~/budgets";
-import { memberOf } from "~/conversations";
+import { memberAlertedTo, memberOf } from "~/conversations";
 import { appMongo } from "../../config/db";
 import type { BudgetAlert } from "./budgets.integrity";
 
@@ -154,24 +154,25 @@ describe("BudgetsService: the 80 % alert", () => {
   test("nothing below 80 %, then one alert with a notice, a mail and the push hook", async () => {
     const kit = authApp();
     const sent: BudgetAlert[] = [];
-    const ada = await memberOf(kit, {
-      now: () => november,
-      onAlert: async (alert) => {
+    const ada = await memberAlertedTo(
+      kit,
+      async (alert) => {
         sent.push(alert);
       },
-    });
+      { now: () => november },
+    );
     await spent(ada.id, { cost: 15, at: november });
-    await ada.budgets.checkAlert(ada.id);
+    await ada.budgets.checkAlert(ada.id, november);
     await kit.auth.background.settled();
     expect((await ada.budgets.status()).alertedAt).toBeNull();
     expect(sentTo(kit.mailer, ada.viewer.email)).toHaveLength(0);
     await spent(ada.id, { cost: 1, at: november });
-    await ada.budgets.checkAlert(ada.id);
+    await ada.budgets.checkAlert(ada.id, november);
     await kit.auth.background.settled();
     expect((await ada.budgets.status()).alertedAt).toEqual(november);
     const mails = sentTo(kit.mailer, ada.viewer.email);
     expect(mails).toHaveLength(1);
-    expect(mails[0]?.subject).toContain("80 %");
+    expect(mails[0]?.subject).toContain("80\u202f%");
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       memberId: ada.id,
@@ -186,12 +187,12 @@ describe("BudgetsService: the 80 % alert", () => {
     const ada = await memberOf(kit, { now: () => november });
     await spent(ada.id, { cost: 17, at: november });
     await Promise.all(
-      Array.from({ length: 5 }, () => ada.budgets.checkAlert(ada.id)),
+      Array.from({ length: 5 }, () => ada.budgets.checkAlert(ada.id, november)),
     );
     await kit.auth.background.settled();
     expect(await appMongo.db.budgetAlerts.raw.countDocuments({})).toBe(1);
     expect(sentTo(kit.mailer, ada.viewer.email)).toHaveLength(1);
-    await ada.budgets.checkAlert(ada.id);
+    await ada.budgets.checkAlert(ada.id, november);
     await kit.auth.background.settled();
     expect(sentTo(kit.mailer, ada.viewer.email)).toHaveLength(1);
   });
@@ -205,10 +206,10 @@ describe("BudgetsService: the 80 % alert", () => {
       { $set: { locale: "en" } },
     );
     await spent(ada.id, { cost: 17, at: november });
-    await ada.budgets.checkAlert(ada.id);
+    await ada.budgets.checkAlert(ada.id, november);
     now = new Date("2026-12-10T15:00:00.000Z");
     await spent(ada.id, { cost: 18, at: now });
-    await ada.budgets.checkAlert(ada.id);
+    await ada.budgets.checkAlert(ada.id, now);
     await kit.auth.background.settled();
     const mails = sentTo(kit.mailer, ada.viewer.email);
     expect(mails).toHaveLength(2);
@@ -222,7 +223,43 @@ describe("BudgetsService: the 80 % alert", () => {
     const ada = await memberOf(kit, { now: () => november });
     await admin.budgets.setMember(ada.id, 0);
     await spent(ada.id, { cost: 1, at: november });
-    await ada.budgets.checkAlert(ada.id);
+    await ada.budgets.checkAlert(ada.id, november);
     expect(await appMongo.db.budgetAlerts.raw.countDocuments({})).toBe(0);
+  });
+
+  test("a run that crossed midnight on the 1st alerts in the month it counts in", async () => {
+    const kit = authApp();
+    const ada = await memberOf(kit, {
+      now: () => new Date("2026-12-01T05:30:00.000Z"),
+    });
+    await spent(ada.id, { cost: 17, at: new Date("2026-12-01T04:30:00.000Z") });
+    const startedInNovember = new Date("2026-12-01T04:30:00.000Z");
+    await ada.budgets.checkAlert(ada.id, startedInNovember);
+    await kit.auth.background.settled();
+    const [alert] = await appMongo.db.budgetAlerts.raw.find({}).toArray();
+    expect(alert).toMatchObject({ memberId: ada.id, month: "2026-11" });
+    expect((await ada.budgets.status()).alertedAt).toBeNull();
+  });
+
+  test("a mailer that throws leaves the alert recorded, and a second check does not mail again", async () => {
+    const kit = authApp();
+    const ada = await memberOf(kit, { now: () => november });
+    let attempts = 0;
+    const send = kit.mailer.send.bind(kit.mailer);
+    kit.mailer.send = async (message) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("smtp down");
+      return send(message);
+    };
+    await spent(ada.id, { cost: 17, at: november });
+    await ada.budgets.checkAlert(ada.id, november);
+    await kit.auth.background.settled();
+    expect(attempts).toBe(1);
+    expect(await appMongo.db.budgetAlerts.raw.countDocuments({})).toBe(1);
+    expect((await ada.budgets.status()).alertedAt).toEqual(november);
+    await ada.budgets.checkAlert(ada.id, november);
+    await kit.auth.background.settled();
+    expect(attempts).toBe(1);
+    expect(sentTo(kit.mailer, ada.viewer.email)).toHaveLength(0);
   });
 });
