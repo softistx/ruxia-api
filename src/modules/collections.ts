@@ -22,4 +22,5 @@ export { members } from "./members/members.model";
 export { memoryItems } from "./memory/memory.model";
 export { models } from "./models/models.model";
 export { personaAvatars, personas } from "./personas/models";
+export { chunks, projectDocuments, projects } from "./projects/models";
 export { translations } from "./translations/translations.model";

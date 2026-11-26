@@ -44,11 +44,27 @@ type MessageThinkingPart {
   text: String!
 }
 
-"A part of a message, in order: text, reasoning, an attachment reference (a member's message) or a proposed action to confirm. Tool calls and results are not shown."
+"""
+A passage of a project document the reply rests on (spec 4.7): one per result of
+the `search_project` tool, in the order found.
+"""
+type MessageCitationPart {
+  "The document it comes from."
+  documentId: ID!
+  "The document's name."
+  name: String!
+  "The start of the passage, up to 400 characters."
+  snippet: String!
+  "How close the passage is to the search, from 0 to 1."
+  score: Float!
+}
+
+"A part of a message, in order: text, reasoning, an attachment reference (a member's message), a citation of a project document or a proposed action to confirm. Tool calls and results are not shown."
 union MessagePart =
   | MessageTextPart
   | MessageThinkingPart
   | MessageAttachmentPart
+  | MessageCitationPart
   | MessageProposedActionPart
 
 """

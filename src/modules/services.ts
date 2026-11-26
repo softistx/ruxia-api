@@ -25,6 +25,14 @@ import { MembersService, memberRenamer } from "./members";
 import { MemoryService, memoryActionTools } from "./memory";
 import { ModelsService, oncePerMinute, type StatusStore } from "./models";
 import { AvatarsService, PersonasService } from "./personas";
+import {
+  DocumentsService,
+  type IndexQueue,
+  type ProjectEmbedder,
+  ProjectSearchService,
+  ProjectsService,
+  type VectorIndex,
+} from "./projects";
 import { loadedCatalogues, TranslationsService } from "./translations";
 
 // One logger for every request: a down status store is said once a minute.
@@ -46,8 +54,12 @@ export type ServiceDeps = {
   // Where the runs live (one per app) and what watches each of them.
   runtime: ConversationsRuntime;
   observers: readonly AgentObserver[];
-  // The private bucket (the exports and the attachments).
+  // The private bucket (the exports, the attachments and the documents).
   media: MediaBucket;
+  // The projects' ports: the embeddings, the vector index and the indexing queue.
+  embedder: ProjectEmbedder;
+  vectors: VectorIndex;
+  indexQueue: IndexQueue;
   now: () => Date;
 };
 
@@ -63,10 +75,12 @@ export function services(deps: ServiceDeps) {
   const modelCatalogue = new ModelsService(appMongo, deps.statuses, (message) =>
     statusWarning("status", message),
   );
+  const { projects, documents } = projectsSide(deps);
   const personas = new PersonasService(
     appMongo,
     modelCatalogue,
     new AvatarsService(appMongo),
+    projects,
     deps.viewer,
     (id) => owners.load(id),
   );
@@ -86,7 +100,14 @@ export function services(deps: ServiceDeps) {
     deps.viewer,
   );
   const memory = new MemoryService(appMongo, personas, members, deps.viewer);
-  const chat = chatSide(deps, modelCatalogue, budgets, personas, memory);
+  const chat = chatSide(
+    deps,
+    modelCatalogue,
+    budgets,
+    personas,
+    memory,
+    projects,
+  );
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
     passkeys: new PasskeysService(deps.auth, deps.request, deps.viewer, limit),
@@ -110,9 +131,43 @@ export function services(deps: ServiceDeps) {
     budgets,
     personas,
     memory,
+    projects,
+    documents,
+    projectLoaders: projectLoaders(documents, personas),
     ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
+    ),
+  };
+}
+
+// The projects and their documents, for a request.
+function projectsSide(deps: ServiceDeps) {
+  const projects = new ProjectsService(appMongo, deps.viewer, deps.now);
+  const documents = new DocumentsService(
+    appMongo,
+    projects,
+    deps.media,
+    deps.vectors,
+    deps.indexQueue,
+    deps.viewer,
+    (message) => statusWarning("documents", message),
+  );
+  return { projects, documents };
+}
+
+// What a project shows of its documents and personas, one read for a list of
+// projects.
+function projectLoaders(
+  documents: DocumentsService,
+  personas: PersonasService,
+) {
+  return {
+    documents: new DataLoader((ids: readonly string[]) =>
+      documents.ofProjects(ids),
+    ),
+    personaIds: new DataLoader((ids: readonly string[]) =>
+      personas.boundToAll(ids),
     ),
   };
 }
@@ -125,6 +180,7 @@ function chatSide(
   budgets: BudgetsService,
   personas: PersonasService,
   memory: MemoryService,
+  projects: ProjectsService,
 ) {
   const attachments = new AttachmentsService(
     appMongo,
@@ -140,6 +196,12 @@ function chatSide(
     personas,
     attachments,
     memory,
+    projects: new ProjectSearchService(
+      { mongo: appMongo, embedder: deps.embedder, vectors: deps.vectors },
+      projects,
+      deps.viewer,
+    ),
+    projectLookup: projects,
     actionTools: memoryActionTools(memory, personas),
     adapters: deps.adapters,
     titleModelId: deps.titleModelId,

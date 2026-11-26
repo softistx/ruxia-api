@@ -10,6 +10,7 @@ import { withImageRendition } from "@softistx/alxia-media/image";
 import type { Viewer } from "../../auth/viewer";
 import type { Throttle } from "../../limits/throttle";
 import { uploadThrottle } from "../../limits/uploads";
+import { boundedUtf8, cleanName } from "../../shared/text";
 import type { AttachmentKind } from "./attachments.model";
 import {
   acceptedTypes,
@@ -24,9 +25,10 @@ import {
   MAX_PDF_PAGES,
   maxBytesOf,
   pdfType,
+  TEXT_LIMIT,
   textTypes,
 } from "./attachments.rules";
-import { boundedUtf8, cleanName, countPages } from "./attachments.utils";
+import { countPages } from "./attachments.utils";
 import type { AttachmentFiles } from "./services/attachment-files.service";
 
 // The name of the kind: the URL segment (`/media/attachments/<key>`) and the
@@ -99,7 +101,7 @@ export function attachmentKind(ports: AttachmentPorts) {
 async function textOf(bucket: Pick<MediaBucket, "open">, key: string) {
   const opened = await bucket.open(attachmentPlace(key));
   if (opened === undefined) throw new Error("an upload is not in the bucket");
-  const text = await boundedUtf8(opened.stream);
+  const text = await boundedUtf8(opened.stream, TEXT_LIMIT);
   if (text === undefined) {
     throw new MediaRefusal("unsupported_type", { reason: "encoding" });
   }

@@ -4,6 +4,7 @@ import type { BudgetsService } from "../budgets/budgets.service";
 import type { MemoryService } from "../memory";
 import type { ModelsService } from "../models";
 import type { PersonasService } from "../personas";
+import type { ProjectSearchService, ProjectsService } from "../projects";
 import type { ConversationDocument } from "./models";
 
 // What the conversations need of the other modules, as ports the registry
@@ -42,6 +43,15 @@ export type ConversationAttachments = Pick<
 // What a run takes of the memory: the facts for the system prompt and the
 // tools, when the persona enables memory. `MemoryService` implements it.
 export type ConversationMemory = Pick<MemoryService, "kit">;
+
+// What a run takes of the projects: the instructions for the system prompt and
+// the `search_project` tool, when the conversation (or its persona) has a
+// project. `ProjectSearchService` implements it.
+export type ConversationProjects = Pick<ProjectSearchService, "kit">;
+
+// What a conversation asks of the projects when it joins one: that the id is
+// the member's own live project. `ProjectsService` implements it.
+export type ConversationProjectLookup = Pick<ProjectsService, "require">;
 
 // The tools a proposed action's name is looked up in when it is confirmed, for
 // the conversation that proposed it. Memory's today; the MCP tools join here.

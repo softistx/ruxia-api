@@ -11,6 +11,8 @@ import type {
   ConversationMemory,
   ConversationModels,
   ConversationPersonas,
+  ConversationProjectLookup,
+  ConversationProjects,
 } from "./conversations.integrity";
 import type { ConversationsRuntime } from "./conversations.runtime";
 import { ActionsService } from "./services/actions.service";
@@ -35,6 +37,8 @@ export type ConversationsDeps = {
   personas: ConversationPersonas;
   attachments: ConversationAttachments;
   memory: ConversationMemory;
+  projects: ConversationProjects;
+  projectLookup: ConversationProjectLookup;
   // The tools a proposed action is looked up in when it is confirmed.
   actionTools: ConversationActionTools;
   adapters: ModelAdapters;
@@ -79,6 +83,7 @@ function runServices(deps: ConversationsDeps, shared: Shared) {
       personas,
       attachments: deps.attachments,
       memory: deps.memory,
+      projects: deps.projects,
       adapters: deps.adapters,
       runtime: deps.runtime,
       observers: deps.observers,
@@ -107,6 +112,7 @@ export function conversationsServices(deps: ConversationsDeps) {
     mongo,
     models,
     personas,
+    deps.projectLookup,
     viewer,
     now,
     idle,

@@ -6,6 +6,7 @@ import { codes as members } from "../modules/members/members.errors";
 import { codes as memory } from "../modules/memory/memory.errors";
 import { codes as models } from "../modules/models/models.errors";
 import { codes as personas } from "../modules/personas/personas.errors";
+import { codes as projects } from "../modules/projects/projects.errors";
 import { codes as operator } from "../scripts/operator.errors";
 import { defineCodes } from "./define-codes";
 
@@ -58,6 +59,7 @@ export const errorCodes = [
   ...memory,
   ...models,
   ...personas,
+  ...projects,
   ...operator,
   ...validation,
 ] as const;

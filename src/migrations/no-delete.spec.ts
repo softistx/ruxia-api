@@ -23,6 +23,7 @@ const exceptions = new Set([
   "src/migrations/2026-11-28-budgets-errors.migration.ts",
   "src/migrations/2026-11-29-attachments-errors.migration.ts",
   "src/migrations/2026-11-30-memory-errors.migration.ts",
+  "src/migrations/2026-12-01-projects-errors.migration.ts",
 ]);
 
 const sources = async () => {

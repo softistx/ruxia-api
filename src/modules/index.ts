@@ -13,6 +13,7 @@ import { members } from "./members/members.resolver";
 import { memory } from "./memory/memory.resolver";
 import { models } from "./models/models.resolver";
 import { personas } from "./personas/resolvers/personas.resolver";
+import { projects } from "./projects/resolvers/projects.resolver";
 import { systemResolvers } from "./system/system.resolver";
 import { translationResolvers } from "./translations/translations.resolver";
 
@@ -33,6 +34,7 @@ export const resolvers = mergeResolvers([
   messages,
   models,
   personas,
+  projects,
   runs,
   systemResolvers,
   translationResolvers,

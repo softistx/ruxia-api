@@ -1,5 +1,6 @@
-# ruxia-api, production: mongo (a one-node replica set), redis, minio, the
-# API and its migration one-shot. Run from this folder (deploy.sh does):
+# ruxia-api, production: mongo (a one-node replica set) with its search
+# component (mongot, for the projects' vector index), redis, minio, ollama-embed
+# (the documents' embeddings), the API and its migration one-shot. Run from this folder (deploy.sh does):
 #
 #   cp .env.example .env     # fill every value, mode 600
 #   ./deploy.sh
@@ -15,11 +16,15 @@ networks:
     external: true
   data:
     internal: true
+  # Outbound only: ollama-embed pulls its model from the Ollama registry.
+  egress: {}
 
 volumes:
   mongo-data:
   redis-data:
   minio-data:
+  mongot-data:
+  ollama-data:
 
 x-api-env: &api-env
   NODE_ENV: production
@@ -28,6 +33,7 @@ x-api-env: &api-env
   MONGO_DATABASE: ruxia
   REDIS_URL: redis://ruxia-redis:6379
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+  EMBED_BASE_URL: http://ruxia-ollama-embed:11434
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   TITLE_MODEL_ID: ${TITLE_MODEL_ID:-claude-haiku-5-5}
   UI_ORIGIN: ${UI_ORIGIN:?}
@@ -47,11 +53,19 @@ x-api-env: &api-env
 
 services:
   mongo:
-    image: mongo:8
+    image: mongo:8.3.17
     container_name: ruxia-mongo
     restart: unless-stopped
     init: true
-    command: ["--replSet", "rs0", "--bind_ip_all"]
+    # The search parameters point mongod at mongot (gRPC, port 27028, no TLS on
+    # the internal network). See deploy/mongot/mongot.yml.
+    command:
+      - --replSet=rs0
+      - --bind_ip_all
+      - --setParameter=mongotHost=ruxia-mongot:27028
+      - --setParameter=searchIndexManagementHostAndPort=ruxia-mongot:27028
+      - --setParameter=useGrpcForSearch=true
+      - --setParameter=searchTLSMode=disabled
     networks: [data]
     volumes:
       - mongo-data:/data/db
@@ -117,6 +131,99 @@ services:
           cpus: "0.5"
           memory: 512M
 
+  # The user mongot syncs with (role searchCoordinator), made once: idempotent.
+  mongot-user:
+    image: mongo:8.3.17
+    container_name: ruxia-mongot-user
+    restart: "no"
+    entrypoint:
+      ["mongosh", "--quiet", "mongodb://ruxia-mongo:27017/admin?replicaSet=rs0"]
+    command:
+      - --eval
+      - >-
+        if (!db.getUser('mongotUser')) db.createUser({ user: 'mongotUser', pwd: process.env.MONGOT_PASSWORD, roles: ['searchCoordinator'] })
+    environment:
+      MONGOT_PASSWORD: ${MONGOT_PASSWORD:?}
+    networks: [data]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  mongot:
+    image: mongodb/mongodb-community-search:1.79.1
+    container_name: ruxia-mongot
+    restart: unless-stopped
+    networks: [data]
+    volumes:
+      - mongot-data:/data/mongot
+      - ./mongot/mongot.yml:/mongot-community/config.default.yml:ro
+    secrets: [mongot_password]
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongot-user:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/health || wget -q -O /dev/null http://localhost:8080/health
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  # The embeddings of the projects' documents: nomic-embed-text, on the CPU.
+  ollama-embed:
+    image: ollama/ollama:0.40.18
+    container_name: ruxia-ollama-embed
+    restart: unless-stopped
+    networks: [data, egress]
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/11434'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+      start_interval: 2s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  # Pulls the model once (a no-op when it is there), then ends. The API does not
+  # wait for it: a document indexed before the pull ends is FAILED
+  # EMBEDDINGS_UNAVAILABLE or retried, and `reindexProjectDocument` brings it back.
+  ollama-pull:
+    image: ollama/ollama:0.40.18
+    container_name: ruxia-ollama-pull
+    restart: "no"
+    entrypoint: ["ollama", "pull", "nomic-embed-text"]
+    environment:
+      OLLAMA_HOST: ruxia-ollama-embed:11434
+    networks: [data, egress]
+    depends_on:
+      ollama-embed:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   api-migrate:
     build:
       context: ..
@@ -134,6 +241,9 @@ services:
     networks: [data]
     depends_on:
       mongo:
+        condition: service_healthy
+      # db-sync creates the vector index: mongot must be serving.
+      mongot:
         condition: service_healthy
     deploy:
       resources:
@@ -170,3 +280,5 @@ services:
 secrets:
   npm_read:
     environment: NPM_SOFTISTX_READ_TOKEN
+  mongot_password:
+    environment: MONGOT_PASSWORD

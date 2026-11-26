@@ -162,6 +162,7 @@ describe("a member's conversations are private", () => {
       "sendMessage",
       "setActiveBranch",
       "setConversationModel",
+      "setConversationProject",
       "startConversation",
       "stopRun",
     ]);

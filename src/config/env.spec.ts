@@ -220,6 +220,20 @@ test("MCP_HOSTNAME and API_ORIGIN are gone: set, they change nothing", async () 
   expect(env.UI_ORIGIN).toBe("https://app.ruxia.example");
 });
 
+test("EMBED_BASE_URL is optional, empty is unset, and must be an http(s) URL", async () => {
+  expect((await load({ EMBED_BASE_URL: undefined })).env.EMBED_BASE_URL).toBe(
+    undefined,
+  );
+  expect((await load({ EMBED_BASE_URL: "" })).env.EMBED_BASE_URL).toBe(
+    undefined,
+  );
+  expect(
+    (await load({ EMBED_BASE_URL: "http://ruxia-ollama-embed:11434" })).env
+      .EMBED_BASE_URL,
+  ).toBe("http://ruxia-ollama-embed:11434");
+  await expect(load({ EMBED_BASE_URL: "embed.local" })).rejects.toThrow();
+});
+
 test("OLLAMA_BASE_URL is optional, empty is unset, and must be an http(s) URL", async () => {
   expect((await load({ OLLAMA_BASE_URL: undefined })).env.OLLAMA_BASE_URL).toBe(
     undefined,

@@ -110,15 +110,23 @@ describe("languageName and systemOf", () => {
         locale: "fr",
         summary: "Earlier.",
         memory: "Remembered facts:\n- [a] Likes tea.",
+        project: "Project instructions:\n- Be brief.",
       }),
     ).toEqual([
       { text: "Be Sage." },
       { text: "Reply in French." },
+      { text: "Project instructions:\n- Be brief." },
       { text: "Remembered facts:\n- [a] Likes tea." },
       { text: "Summary of the earlier conversation:\nEarlier." },
     ]);
     expect(
-      systemOf({ personality: "", locale: "en", summary: null, memory: null }),
+      systemOf({
+        personality: "",
+        locale: "en",
+        summary: null,
+        memory: null,
+        project: null,
+      }),
     ).toEqual([{ text: "Reply in English." }]);
   });
 });

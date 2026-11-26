@@ -1,0 +1,164 @@
+"Where the indexing of a project document stands."
+enum DocumentStatus {
+  "Waiting for the background indexing (or being indexed)."
+  PENDING
+  "Chunked, embedded and searchable."
+  INDEXED
+  "Not searchable; `errorCode` says why."
+  FAILED
+}
+
+"""
+A file of a project (spec 4.7): uploaded with `PUT /media/project-documents`
+(the file as the body, its name in `x-file-name` and the project's id in
+`x-project-id`; Markdown, plain text and PDF), which answers `{ id, key,
+contentType, size, name, status }`. The file is read at
+`GET /media/project-documents/<key>` by its owner alone. A PDF is stored but
+not searchable yet: it is FAILED with `errorCode` `PDF_TEXT_UNAVAILABLE`, until
+text extraction exists. Only the first 400,000 characters of a text file are
+indexed (about 140 chunks); the rest of a larger file is stored but not
+searchable, and nothing on the document says so. Never a URL.
+"""
+type ProjectDocument {
+  "The document's id."
+  id: ID!
+  "The project it belongs to."
+  projectId: ID!
+  "The media key of the file (never a URL)."
+  key: String!
+  "The name the file was uploaded with."
+  name: String!
+  "The content type the server checked."
+  mime: String!
+  "Its size in bytes."
+  bytes: Int!
+  "Where the indexing stands."
+  status: DocumentStatus!
+  """
+  Why it is FAILED, else null: `PDF_TEXT_UNAVAILABLE`, `NOT_TEXT`,
+  `EMPTY_DOCUMENT`, `FILE_MISSING`, `EMBEDDINGS_UNAVAILABLE`, `QUEUE_UNAVAILABLE`
+  or `INDEXING_FAILED`.
+  """
+  errorCode: String
+  "How many chunks are searchable (0 until INDEXED)."
+  chunkCount: Int!
+  "When it was uploaded."
+  createdAt: DateTime!
+}
+
+"""
+A member's project (spec 4.7): instructions the model reads in every run of
+the project, the documents it searches, and the personas bound to it. Only its
+owner reads it: another member gets `projects.errors.not-found`, and so does the
+admin.
+"""
+type Project {
+  "The project's id."
+  id: ID!
+  "Its name, up to 80 characters."
+  name: String!
+  "What the model is told about the project (the member's own notes), up to 4000 characters."
+  instructions: String!
+  "The ids of its documents, oldest first."
+  documentIds: [ID!]!
+  "Its documents, oldest first."
+  documents: [ProjectDocument!]!
+  "The ids of the member's personas bound to it."
+  personaIds: [ID!]!
+  "The version an update names to lock on."
+  version: Int!
+  "When it was deleted; null while it is live."
+  deletedAt: DateTime
+  "When a deleted project is purged for good, with its documents; null while it is live."
+  purgeAt: DateTime
+  "When it was created."
+  createdAt: DateTime!
+  "When it last changed."
+  updatedAt: DateTime!
+}
+
+"The project to create."
+input CreateProjectInput {
+  "Its name."
+  name: String! @constraint(minLength: 1, maxLength: 80)
+  "What the model is told about it; empty when left out. At most 4000 characters once trimmed (the field takes 100 more for the whitespace around them): `validation.errors.invalid-input` (field `instructions`, `too-long`) past that."
+  instructions: String @constraint(maxLength: 4100)
+}
+
+"""
+What to change of a project. A field left out stays as it is; `name` and
+`instructions` given as null are refused (`validation.errors.required`).
+"""
+input UpdateProjectInput {
+  "The new name."
+  name: String @constraint(minLength: 1, maxLength: 80)
+  "The new instructions; at most 4000 characters once trimmed (the field takes 100 more for the whitespace around them)."
+  instructions: String @constraint(maxLength: 4100)
+  "The version the client read: another write since is 409 `projects.errors.version-conflict`."
+  version: Int
+}
+
+extend type Query {
+  "The member's live projects, most recently changed first, at most 50."
+  projects: [Project!]!
+
+  "One of the member's live projects. 404 `projects.errors.not-found` for an unknown, deleted or another member's one (the admin's too)."
+  project("The project's id." id: ID! @constraint(maxLength: 64)): Project!
+}
+
+extend type Mutation {
+  """
+  Creates a project. 409 `projects.errors.too-many` past 50 projects; `name` is
+  refused when blank and `instructions` past 4000 characters.
+  """
+  createProject(
+    "Its name and instructions."
+    input: CreateProjectInput!
+  ): Project!
+
+  """
+  Changes a project. 404 `projects.errors.not-found`; 409
+  `projects.errors.version-conflict` when `version` is not the current one.
+  """
+  updateProject(
+    "The project's id."
+    id: ID! @constraint(maxLength: 64)
+    "What to change."
+    input: UpdateProjectInput!
+  ): Project!
+
+  """
+  Soft-deletes a project; it can be restored for 30 days, then it is purged with
+  its documents, chunks and files. Runs stop searching it at once. 404
+  `projects.errors.not-found`.
+  """
+  deleteProject(
+    "The project's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Project!
+
+  "Brings back a project deleted less than 30 days ago (a live one is returned as it is). 404 `projects.errors.not-found` for an unknown one or one past the window."
+  restoreProject(
+    "The project's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Project!
+
+  """
+  Removes a document: its chunks, its file and its record. Answers its id. 404
+  `projects.errors.document-not-found`.
+  """
+  deleteProjectDocument(
+    "The document's id."
+    id: ID! @constraint(maxLength: 64)
+  ): ID!
+
+  """
+  Indexes a FAILED (or never started) document again and answers it PENDING. A
+  PDF cannot be retried: 409 `projects.errors.document-not-retryable`, also for
+  an INDEXED one. 404 `projects.errors.document-not-found`.
+  """
+  reindexProjectDocument(
+    "The document's id."
+    id: ID! @constraint(maxLength: 64)
+  ): ProjectDocument!
+}

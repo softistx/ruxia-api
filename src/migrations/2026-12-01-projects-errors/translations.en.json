@@ -1,0 +1,8 @@
+{
+  "projects.errors.not-found": "This project does not exist.",
+  "projects.errors.document-not-found": "This document does not exist.",
+  "projects.errors.document-not-retryable": "This document cannot be indexed again.",
+  "projects.errors.version-conflict": "This project changed since you opened it. Reload it and try again.",
+  "projects.errors.too-many": "You already have {max, plural, one {# project} other {# projects}}, the most you can keep. Delete one to add another.",
+  "projects.errors.too-many-documents": "This project already holds {max, plural, one {# document} other {# documents}}, the most it can keep. Delete one to add another."
+}

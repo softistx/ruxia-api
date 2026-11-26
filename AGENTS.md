@@ -20,6 +20,13 @@ member owns them, but they never expose content: nothing they read is logged,
 returned or mailed beyond ids and counts. The purge takes each conversation by a
 conditional claim (`purgingAt`) that a restore cannot pass. The purge never touches
 `spend` (the figures ledger that budgets read).
+The projects add two more system jobs, started from `server.ts` only: the
+`IndexingWorker` (the `indexing` queue of `@softistx/redis`, or `localQueues` in
+this process without `REDIS_URL`) and the daily `ProjectsPurge` (same ticker port
+and `purgingAt` claim as the conversations'). They read and write across owners
+(raw, no viewer) and never log or return content. Vector search is behind the
+`VectorIndex` port (MongoDB `$vectorSearch` in production, in-memory cosine in
+specs): every search names the owner and one project.
 The **budget alert** is a background notice, not a ticker job: it runs after a run's end
 without a request viewer, writes only `budgetAlerts`, and mails the member through
 `auth.mailer` in the background (a failed send is logged, never retried).
@@ -30,7 +37,11 @@ without a request viewer, writes only `budgetAlerts`, and mails the member throu
   entity for its undo). `deleteAttachment(id)` is single-item too: it is the UI's
   per-chip remove of one unsent upload, answers the id, and is refused once a message
   carries the file (Assumed, not answered: the recommended option, taken in the
-  night window).
+  night window). The same holds for `deleteProject(id)` and `restoreProject(id)`
+  (the project, as the conversation's: soft delete with a 30-day restore),
+  `deleteProjectDocument(id)` (answers the id), `deletePersona(id)` and
+  `deleteMemoryItem(id)`: per-item UI actions, not bulk ones (Assumed, not
+  answered: the recommended option, taken in the night window).
 
 - **Coordination**: the ruxia session in `~/workspace/dev/ruxia/` coordinates; send it
   status, merges, blockers and owner questions with a recommended option.
@@ -41,11 +52,12 @@ without a request viewer, writes only `budgetAlerts`, and mails the member throu
 - **Privacy**: the admin never reads members' conversations, messages, attachments,
   memory or projects; no resolver or script exposes them (a leak spec guards it).
 - **AI through `@softistx/ai-*` only**: no provider SDK, no hand-made SSE writer, no
-  app-side embeddings or search client. A gap is filed on softistx/ai and the slice waits.
-- **Transports**: `/graphql` is the entry point; `/media` (the private bucket's `persona-avatars`, `attachments` and `conversation-exports`) and
+  app-side embeddings or search client (`$vectorSearch` of our own MongoDB is not a
+  search client). A gap is filed on softistx/ai and the slice waits.
+- **Transports**: `/graphql` is the entry point; `/media` (the private bucket's `persona-avatars`, `attachments`, `project-documents` and `conversation-exports`) and
   `GET /runs/:runId/events` (the SSE stream of a run, spec §1 and §4.5) are the transports
   beside it, through `@softistx/alxia-media` and `@softistx/ai-alxia`. Any other route is
   asked about first.
 - **Writes by a model are proposed actions** confirmed by the user (MCP, memory).
-- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now`, `titleModelId`, `runtime` (the runs' host, one per app), `observers` (`aiTelemetry`, no content), `heartbeatMs` and `maxRunMs` (10 minutes); no module defaults a port.
+- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now`, `titleModelId`, `runtime` (the runs' host, one per app), `observers` (`aiTelemetry`, no content), `heartbeatMs` and `maxRunMs` (10 minutes), and the ports of the infrastructure it hands to the services: `media` (the private bucket), `statuses` (the Ollama probe's store), `embedder` (the embeddings, `EMBED_BASE_URL`), `vectors` (the `VectorIndex`) and `indexQueue` (the indexing queue) (Assumed, not answered: the recommended option, taken in the night window, with `media` and `statuses` as precedent); no module defaults a port.
 - **CI**: no workflow yet; the local green bar is the proof until one is added.

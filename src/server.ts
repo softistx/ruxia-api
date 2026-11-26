@@ -3,9 +3,11 @@ import { syncMongoAdapter, syncMongoInvitations } from "@softistx/janus-mongo";
 import { MigrationLockedError } from "@softistx/mongo/migrations";
 import { app } from "./app";
 import { appMongo, databaseOf } from "./config/db";
+import { serverEmbedder } from "./config/embeddings";
 import { env } from "./config/env";
 import { serverMedia } from "./config/media";
-import { redis, serverStatuses } from "./config/redis";
+import { redis, serverQueues, serverStatuses } from "./config/redis";
+import { serverVectors } from "./config/vectors";
 import { MigrationsOutOfSyncError } from "./migrations/status";
 import { AttachmentsPurge } from "./modules/attachments";
 import {
@@ -22,6 +24,14 @@ import {
   PROBE_INTERVAL_MS,
   PROBE_TIMEOUT_MS,
 } from "./modules/models";
+import {
+  DocumentIndexer,
+  ensureVectorIndex,
+  IndexingWorker,
+  PROJECTS_PURGE_BATCH,
+  PROJECTS_PURGE_INTERVAL_MS,
+  ProjectsPurge,
+} from "./modules/projects";
 import { bootCatalogues } from "./modules/translations";
 
 // In development, janus's collections, indexes and validators are synced at
@@ -35,6 +45,13 @@ if (development) {
   await appMongo.sync();
   await syncMongoAdapter(databaseOf(appMongo));
   await syncMongoInvitations(databaseOf(appMongo));
+  // The vector index needs MongoDB's search component (`mongot`, deploy/): a
+  // development database without it only loses `search_project`.
+  try {
+    await ensureVectorIndex(appMongo.db.chunks.raw);
+  } catch (error) {
+    console.warn(`vector index not created: ${(error as Error).message}`);
+  }
 }
 
 // The API's texts come from the database, written by the migrations: in
@@ -107,6 +124,40 @@ const purge = new ConversationsPurge({
 purge.start();
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => purge.stop());
+}
+
+// The indexing of the projects' documents (queue `indexing`: Redis, or this
+// process without REDIS_URL) and the daily purge of deleted projects: started
+// here only, never by a spec.
+if (redis === undefined)
+  console.warn("indexing queue is in-process: no REDIS_URL");
+const indexing = new IndexingWorker(
+  serverQueues.indexing,
+  new DocumentIndexer({
+    mongo: appMongo,
+    files: serverMedia,
+    embedder: serverEmbedder,
+    vectors: serverVectors,
+    log: (message) => console.warn(message),
+  }),
+);
+indexing.start();
+const projectsPurge = new ProjectsPurge({
+  mongo: appMongo,
+  files: serverMedia,
+  vectors: serverVectors,
+  ticker: intervalTicker,
+  now: () => new Date(),
+  intervalMs: PROJECTS_PURGE_INTERVAL_MS,
+  batch: PROJECTS_PURGE_BATCH,
+  log: (message) => console.warn(message),
+});
+projectsPurge.start();
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    projectsPurge.stop();
+    void indexing.stop();
+  });
 }
 
 // In dev, the URL and the route table; in production, the URL alone. On

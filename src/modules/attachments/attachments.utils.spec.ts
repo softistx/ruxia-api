@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { pdfWithPages } from "~/media";
 import type { AttachmentDocument, AttachmentPart } from "./attachments.model";
 import {
-  boundedUtf8,
-  cleanName,
   countPages,
   isAttachment,
   mapLimit,
@@ -41,20 +39,6 @@ const seeing = readerOf({ provider: "ollama", capabilities: ["vision"] });
 const data = { data: "QUJD", skipped: false };
 const gone = { data: undefined, skipped: false };
 const unread = { data: undefined, skipped: true };
-
-describe("cleanName", () => {
-  test("decodes, strips control characters and bounds the name", () => {
-    expect(cleanName("caf%C3%A9.txt")).toBe("café.txt");
-    expect(cleanName("a\u0000b\n.txt")).toBe("ab.txt");
-    expect(cleanName("x".repeat(300))).toHaveLength(200);
-    expect(cleanName("%E0%A4%A")).toBe("%E0%A4%A");
-  });
-
-  test("falls back to attachment", () => {
-    expect(cleanName(null)).toBe("attachment");
-    expect(cleanName("  ")).toBe("attachment");
-  });
-});
 
 describe("references", () => {
   test("a reference carries the key, kind, name, mime and size, and reads as its name", () => {
@@ -180,43 +164,6 @@ describe("mapLimit", () => {
 
   test("no items is no work", async () => {
     expect(await mapLimit([], 4, async () => 1)).toEqual([]);
-  });
-});
-
-const streamOf = (...chunks: Uint8Array[]) =>
-  (async function* () {
-    yield* chunks;
-  })();
-const bytesOf = (text: string) => new TextEncoder().encode(text);
-
-describe("boundedUtf8", () => {
-  test("reads valid UTF-8 split anywhere, even inside a character", async () => {
-    const all = bytesOf("héllo 🎉");
-    const out = await boundedUtf8(
-      streamOf(all.slice(0, 2), all.slice(2, 9), all.slice(9)),
-    );
-    expect(out).toEqual({ text: "héllo 🎉", truncated: false });
-  });
-
-  test("keeps the first characters and says there was more, still checking the rest", async () => {
-    const out = await boundedUtf8(
-      streamOf(bytesOf("abcdef"), bytesOf("ghij")),
-      4,
-    );
-    expect(out).toEqual({ text: "abcd", truncated: true });
-    expect(
-      await boundedUtf8(streamOf(bytesOf("abcdef"), Uint8Array.of(0xff)), 4),
-    ).toBeUndefined();
-  });
-
-  test("refuses an invalid sequence, a cut character at the end and a NUL byte", async () => {
-    expect(
-      await boundedUtf8(streamOf(Uint8Array.of(0x68, 0xff))),
-    ).toBeUndefined();
-    expect(await boundedUtf8(streamOf(Uint8Array.of(0xc3)))).toBeUndefined();
-    expect(
-      await boundedUtf8(streamOf(Uint8Array.of(0x68, 0, 0x69))),
-    ).toBeUndefined();
   });
 });
 

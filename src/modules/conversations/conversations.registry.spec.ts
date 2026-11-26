@@ -19,6 +19,8 @@ test("builds the ten conversations services, wired to the viewer", async () => {
     personas: ada.deps.personas,
     attachments: ada.attachments,
     memory: ada.memory,
+    projects: ada.deps.projects,
+    projectLookup: ada.projects,
     actionTools: memoryActionTools(ada.memory, ada.deps.personas),
     adapters: adaptersByModel({}),
     titleModelId: "claude-haiku-5-5",

@@ -1,5 +1,6 @@
 import { syncMongoAdapter, syncMongoInvitations } from "@softistx/janus-mongo";
 import { appMongo, closeDatabases, databaseOf } from "../config/db";
+import { ensureVectorIndex } from "../modules/projects/projects.vector.mongo";
 
 // A deployment step: brings the validators and indexes of the database, and
 // janus's collections (users, sessions, tokens, relations, invitations), to what the
@@ -11,6 +12,10 @@ try {
   await syncMongoAdapter(databaseOf(appMongo));
   // Not part of syncMongoAdapter: the invitations are an opt-in port.
   await syncMongoInvitations(databaseOf(appMongo));
+  // The vector search index of the chunks: created once, needs `mongot`
+  // (deploy/docker-compose.yaml). A failure stops the step.
+  const vectorIndex = await ensureVectorIndex(appMongo.db.chunks.raw);
+  console.log(JSON.stringify({ vectorIndex }));
   console.log(JSON.stringify({ database: appMongo.db.databaseName }, null, 2));
 } finally {
   await closeDatabases();

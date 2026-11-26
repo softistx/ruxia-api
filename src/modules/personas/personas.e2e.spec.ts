@@ -68,6 +68,12 @@ const CATALOGUE_QUERY = graphql(`
   }
 `);
 
+const CREATE_PROJECT_MUTATION = graphql(`
+  mutation PersonaSpecProject($name: String!) {
+    createProject(input: { name: $name }) { id }
+  }
+`);
+
 beforeAll(() => appMongo.db.personas.raw.deleteMany({}));
 
 const model = "claude-sonnet-5-5";
@@ -77,13 +83,17 @@ describe("personas over /graphql", () => {
     const kit = authApp();
     const ada = await signedInAccount(kit);
     const client = kit.client(ada.token);
+    const bound = await client.query(CREATE_PROJECT_MUTATION, {
+      variables: { name: "P1" },
+    });
+    const p1 = bound.data?.createProject.id ?? "";
     const created = await client.query(CREATE_PERSONA_MUTATION, {
       variables: {
         input: {
           name: "Sage",
           defaultModelId: model,
           tools: { webSearch: true },
-          projectIds: ["p1"],
+          projectIds: [p1],
         },
       },
     });
@@ -95,7 +105,7 @@ describe("personas over /graphql", () => {
       visibility: "PRIVATE",
       featured: false,
       tools: { webSearch: true, mcpServerIds: [] },
-      projectIds: ["p1"],
+      projectIds: [p1],
     });
     const id = persona?.id ?? "";
     const stale = persona?.version ?? 0;
@@ -320,5 +330,50 @@ describe("personas over /graphql", () => {
       },
     });
     expect(codeOf(foreign)).toBe("validation.errors.invalid-input");
+  });
+});
+
+const READ_BOUND = graphql(`
+  query PersonaBoundRead($id: ID!) {
+    persona(id: $id) { id projectIds tools { mcpServerIds } }
+  }
+`);
+
+describe("what a persona points at is its owner's", () => {
+  test("another member reading a TEAM persona sees no project and no MCP server", async () => {
+    const kit = authApp();
+    const ada = await signedInAccount(kit);
+    const bea = await signedInAccount(kit);
+    const owner = kit.client(ada.token);
+    const project = await owner.query(CREATE_PROJECT_MUTATION, {
+      variables: { name: "Secret" },
+    });
+    const projectId = project.data?.createProject.id ?? "";
+    const created = await owner.query(CREATE_PERSONA_MUTATION, {
+      variables: {
+        input: {
+          name: "Shared",
+          defaultModelId: model,
+          visibility: "TEAM",
+          projectIds: [projectId],
+          tools: { mcpServerIds: ["server-1"] },
+        },
+      },
+    });
+    const id = created.data?.createPersona.id ?? "";
+    const mine = await owner.query(READ_BOUND, { variables: { id } });
+    expect(mine.data?.persona).toMatchObject({
+      projectIds: [projectId],
+      tools: { mcpServerIds: ["server-1"] },
+    });
+    const theirs = await kit
+      .client(bea.token)
+      .query(READ_BOUND, { variables: { id } });
+    expect(theirs.errors).toBeUndefined();
+    expect(theirs.data?.persona).toMatchObject({
+      projectIds: [],
+      tools: { mcpServerIds: [] },
+    });
+    expect(JSON.stringify(theirs.data)).not.toContain(projectId);
   });
 });

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { DOCUMENT_TOKENS, IMAGE_TOKENS } from "@softistx/ai-core";
 import { gifOfSize } from "~/media";
 import {
-  boundedText,
   estimateAttachment,
   FILE_MAX_BYTES,
   GIF_MAX_BYTES,
@@ -34,17 +33,6 @@ describe("kindOfType", () => {
     expect(isRendered("image/jpeg")).toBe(true);
     expect(isRendered("image/gif")).toBe(false);
     expect(isRendered("application/pdf")).toBe(false);
-  });
-});
-
-describe("boundedText", () => {
-  test("keeps a short text and cuts a long one, never inside a surrogate pair", () => {
-    expect(boundedText("abc", 5)).toEqual({ text: "abc", truncated: false });
-    expect(boundedText("abcdef", 3)).toEqual({ text: "abc", truncated: true });
-    expect(boundedText("ab🎉", 3)).toEqual({ text: "ab", truncated: true });
-    expect(boundedText("x".repeat(TEXT_LIMIT + 1)).text).toHaveLength(
-      TEXT_LIMIT,
-    );
   });
 });
 

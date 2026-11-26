@@ -29,6 +29,8 @@ type Conversation {
   title: String
   "When the last message was written."
   lastMessageAt: DateTime!
+  "The project the conversation belongs to (its instructions and documents join every run); null when it has none."
+  projectId: ID
   "The last message of the branch shown; null while nothing was said."
   activeLeafId: ID
   "The id of the answer being written (the assistant message's id); null while idle."
@@ -76,6 +78,8 @@ type ConversationConnection {
 input ConversationFilter {
   "Only the conversations held with this persona."
   personaId: ID @constraint(maxLength: 64)
+  "Only the conversations of this project."
+  projectId: ID @constraint(maxLength: 64)
   """
   Only the conversations whose title or messages contain every word, in the same title or message (full-text,
   case and accents ignored, whole words). Operators are never interpreted; the
@@ -155,6 +159,20 @@ extend type Mutation {
     id: ID! @constraint(maxLength: 64)
     "The model the next message goes to."
     modelId: String! @constraint(minLength: 1, maxLength: 200)
+  ): Conversation!
+
+  """
+  Puts one of the member's conversations in one of their live projects, or takes
+  it out of its project with a null `projectId`. From the next message on, runs
+  carry the project's instructions and the `search_project` tool. 404
+  `conversations.errors.not-found`; 404 `projects.errors.not-found` for an
+  unknown, deleted or another member's project.
+  """
+  setConversationProject(
+    "The conversation's id."
+    id: ID! @constraint(maxLength: 64)
+    "The project, or null for none."
+    projectId: ID @constraint(maxLength: 64)
   ): Conversation!
 
   """
