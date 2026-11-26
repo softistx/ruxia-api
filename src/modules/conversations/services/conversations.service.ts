@@ -21,6 +21,7 @@ import {
 import type {
   ConversationModels,
   ConversationPersonas,
+  ConversationProjectLookup,
 } from "../conversations.integrity";
 import { RESTORE_WINDOW_MS } from "../conversations.rules";
 import { isPersonaMissing } from "../conversations.utils";
@@ -49,6 +50,7 @@ export class ConversationsService {
     private readonly mongo: Pick<AppMongo, "as" | "db">,
     private readonly models: ConversationModels,
     private readonly personas: ConversationPersonas,
+    private readonly projects: ConversationProjectLookup,
     private readonly viewer: Viewer | null,
     private readonly now: () => Date,
     private readonly idle: Pick<IdleService, "require">,
@@ -94,7 +96,11 @@ export class ConversationsService {
   // deleted within the 30 days, the latest deletion first.
   async list(args: Page) {
     const personaId = args.filter?.personaId ?? undefined;
-    if (personaId !== undefined && !isObjectIdString(personaId)) {
+    const projectId = args.filter?.projectId ?? undefined;
+    if (
+      (personaId !== undefined && !isObjectIdString(personaId)) ||
+      (projectId !== undefined && !isObjectIdString(projectId))
+    ) {
       return toConnection(args.after, { items: [], nextCursor: null }, 0);
     }
     const trash = args.filter?.deleted === true;
@@ -106,6 +112,7 @@ export class ConversationsService {
         purgingAt: null,
       }),
       ...(personaId !== undefined && { personaId }),
+      ...(projectId !== undefined && { projectId }),
       ...(args.only !== undefined && { _id: { $in: [...args.only] } }),
     };
     try {
@@ -120,6 +127,7 @@ export class ConversationsService {
           scope: cursorScopeOf("conversations", [
             this.actor,
             personaId ?? null,
+            ...(projectId === undefined ? [] : [`project:${projectId}`]),
             ...(trash ? ["deleted"] : []),
             ...(args.searched === undefined ? [] : [args.searched]),
           ]),
@@ -184,6 +192,19 @@ export class ConversationsService {
     await this.requireModel(modelId);
     try {
       return await this.conversations.update(conversation._id, { modelId });
+    } catch (error) {
+      if (error instanceof NotFoundError) throw notFound();
+      throw error;
+    }
+  }
+
+  // Puts the conversation in one of the member's live projects, or out of its
+  // project with null.
+  async setProject(id: string, projectId: string | null) {
+    const conversation = await this.find(id);
+    if (projectId !== null) await this.projects.require(projectId);
+    try {
+      return await this.conversations.update(conversation._id, { projectId });
     } catch (error) {
       if (error instanceof NotFoundError) throw notFound();
       throw error;

@@ -10,6 +10,7 @@ import { messagesErrors } from "./2026-11-27-messages-errors.migration";
 import { budgetsErrors } from "./2026-11-28-budgets-errors.migration";
 import { attachmentsErrors } from "./2026-11-29-attachments-errors.migration";
 import { memoryErrors } from "./2026-11-30-memory-errors.migration";
+import { projectsErrors } from "./2026-12-01-projects-errors.migration";
 
 // Every data migration, in execution order. A migration only grows: a new one
 // is appended, none is edited once it ran.
@@ -25,4 +26,5 @@ export const migrations: Migration[] = [
   budgetsErrors,
   attachmentsErrors,
   memoryErrors,
+  projectsErrors,
 ];

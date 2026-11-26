@@ -20,6 +20,13 @@ member owns them, but they never expose content: nothing they read is logged,
 returned or mailed beyond ids and counts. The purge takes each conversation by a
 conditional claim (`purgingAt`) that a restore cannot pass. The purge never touches
 `spend` (the figures ledger that budgets read).
+The projects add two more system jobs, started from `server.ts` only: the
+`IndexingWorker` (the `indexing` queue of `@softistx/redis`, or `localQueues` in
+this process without `REDIS_URL`) and the daily `ProjectsPurge` (same ticker port
+and `purgingAt` claim as the conversations'). They read and write across owners
+(raw, no viewer) and never log or return content. Vector search is behind the
+`VectorIndex` port (MongoDB `$vectorSearch` in production, in-memory cosine in
+specs): every search names the owner and one project.
 The **budget alert** is a background notice, not a ticker job: it runs after a run's end
 without a request viewer, writes only `budgetAlerts`, and mails the member through
 `auth.mailer` in the background (a failed send is logged, never retried).

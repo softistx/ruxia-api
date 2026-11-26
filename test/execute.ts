@@ -13,7 +13,7 @@ import { memoryBucket } from "./media";
 // Runs an operation in process, as `viewer`, with the resolvers of /graphql
 // and no HTTP in between.
 export async function executeAs<D, V extends Record<string, unknown>>(
-  kit: Pick<AuthApp, "auth">,
+  kit: Pick<AuthApp, "auth" | "projects">,
   viewer: Viewer | null,
   document: TypedDocumentNode<D, V>,
   variables?: V,
@@ -37,6 +37,9 @@ export async function executeAs<D, V extends Record<string, unknown>>(
         runtime: conversationsRuntime({ maxRunMs: 60_000 }),
         observers: [],
         media: memoryBucket().bucket,
+        embedder: kit.projects.embedder,
+        vectors: kit.projects.vectors,
+        indexQueue: kit.projects.queue,
         now: () => new Date(),
       }),
     },

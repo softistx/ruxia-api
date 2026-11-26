@@ -48,6 +48,11 @@ import {
   type StatusStore,
 } from "../src/modules/models";
 import { AvatarsService, PersonasService } from "../src/modules/personas";
+import {
+  DocumentsService,
+  ProjectSearchService,
+  ProjectsService,
+} from "../src/modules/projects";
 import { adaptersByModel } from "./ai";
 // A member's conversation services for specs, over a real account: the
 // conversations, messages and personas services of one viewer.
@@ -87,14 +92,16 @@ function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
     options.statuses ?? noStatuses,
     () => {},
   );
+  const now = options.now ?? (() => new Date());
+  const projects = new ProjectsService(appMongo, viewer, now);
   const personas = new PersonasService(
     appMongo,
     models,
     new AvatarsService(appMongo),
+    projects,
     viewer,
     async (id) => ({ id, name: options.name ?? "Ada" }),
   );
-  const now = options.now ?? (() => new Date());
   const messages = new MessagesService(appMongo, viewer, now);
   const attachments = new AttachmentsService(
     appMongo,
@@ -114,6 +121,7 @@ function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
     appMongo,
     models,
     personas,
+    projects,
     viewer,
     now,
     idle,
@@ -121,6 +129,7 @@ function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
   return {
     models,
     personas,
+    projects,
     attachments,
     now,
     messages,
@@ -186,6 +195,15 @@ function servicesOfMember(
     personas: core.personas,
     attachments: core.attachments,
     memory,
+    projects: new ProjectSearchService(
+      {
+        mongo: appMongo,
+        embedder: kit.projects.embedder,
+        vectors: kit.projects.vectors,
+      },
+      core.projects,
+      viewer,
+    ),
     adapters,
     runtime: core.runtime,
     idle,
@@ -197,6 +215,17 @@ function servicesOfMember(
   };
   return {
     personas: core.personas,
+    projects: core.projects,
+    projectSearch: deps.projects,
+    documents: new DocumentsService(
+      appMongo,
+      core.projects,
+      { ...memoryBucket().bucket, ...options.media },
+      kit.projects.vectors,
+      kit.projects.queue,
+      viewer,
+      warn,
+    ),
     attachments: core.attachments,
     members,
     memory,

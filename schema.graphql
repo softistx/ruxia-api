@@ -236,6 +236,10 @@ type Conversation {
   """The persona's name and avatar when the conversation started."""
   personaSnapshot: PersonaSnapshot!
   """
+  The project the conversation belongs to (its instructions and documents join every run); null when it has none.
+  """
+  projectId: ID
+  """
   When it will be purged for good (30 days after it was deleted); null while it is live.
   """
   purgeAt: DateTime
@@ -275,6 +279,8 @@ input ConversationFilter {
   deleted: Boolean
   """Only the conversations held with this persona."""
   personaId: ID @constraint(maxLength: 64)
+  """Only the conversations of this project."""
+  projectId: ID @constraint(maxLength: 64)
   """
   Only the conversations whose title or messages contain every word, in the same title or message (full-text,
   case and accents ignored, whole words). Operators are never interpreted; the
@@ -309,6 +315,14 @@ input CreatePersonaInput {
   voiceId: String @constraint(maxLength: 100)
 }
 
+"""The project to create."""
+input CreateProjectInput {
+  """What the model is told about it; empty when left out."""
+  instructions: String @constraint(maxLength: 8000)
+  """Its name."""
+  name: String! @constraint(minLength: 1, maxLength: 80)
+}
+
 """
 A cuid2: a lowercase letter, then lowercase letters and digits, 2 to 32 in all.
 """
@@ -322,6 +336,16 @@ scalar Date @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc3339#section-5.
 
 """An instant: an RFC 3339 date-time with its offset."""
 scalar DateTime @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc3339")
+
+"""Where the indexing of a project document stands."""
+enum DocumentStatus {
+  """Not searchable; `errorCode` says why."""
+  FAILED
+  """Chunked, embedded and searchable."""
+  INDEXED
+  """Waiting for the background indexing (or being indexed)."""
+  PENDING
+}
 
 """An ISO 8601 duration, such as P1DT2H or PT0.5S."""
 scalar Duration @specifiedBy(url: "https://www.iso.org/iso-8601-date-and-time-format.html")
@@ -726,6 +750,21 @@ type MessageAttachmentPart {
   name: String!
 }
 
+"""
+A passage of a project document the reply rests on (spec 4.7): one per result of
+the `search_project` tool, in the order found.
+"""
+type MessageCitationPart {
+  """The document it comes from."""
+  documentId: ID!
+  """The document's name."""
+  name: String!
+  """How close the passage is to the search, from 0 to 1."""
+  score: Float!
+  """The start of the passage, up to 400 characters."""
+  snippet: String!
+}
+
 """A page of messages."""
 type MessageConnection {
   """The messages of the page."""
@@ -743,9 +782,9 @@ type MessageEdge {
 }
 
 """
-A part of a message, in order: text, reasoning, an attachment reference (a member's message) or a proposed action to confirm. Tool calls and results are not shown.
+A part of a message, in order: text, reasoning, an attachment reference (a member's message), a citation of a project document or a proposed action to confirm. Tool calls and results are not shown.
 """
-union MessagePart = MessageAttachmentPart | MessageProposedActionPart | MessageTextPart | MessageThinkingPart
+union MessagePart = MessageAttachmentPart | MessageCitationPart | MessageProposedActionPart | MessageTextPart | MessageThinkingPart
 
 """A proposed action of a message, as the confirmation card shows it."""
 type MessageProposedActionPart {
@@ -967,6 +1006,14 @@ type Mutation {
     input: CreatePersonaInput!
   ): Persona!
   """
+  Creates a project. 409 `projects.errors.too-many` past 50 projects; `name` is
+  refused when blank and `instructions` past 4000 characters.
+  """
+  createProject(
+    """Its name and instructions."""
+    input: CreateProjectInput!
+  ): Project!
+  """
   Removes an upload no message carries yet (its file and its record). 404
   `attachments.errors.not-found`; 409 `attachments.errors.in-use` once a
   message carries it. Answers its id.
@@ -997,6 +1044,23 @@ type Mutation {
   """
   deletePersona(
     """The persona's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): ID!
+  """
+  Soft-deletes a project; it can be restored for 30 days, then it is purged with
+  its documents, chunks and files. Runs stop searching it at once. 404
+  `projects.errors.not-found`.
+  """
+  deleteProject(
+    """The project's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Project!
+  """
+  Removes a document: its chunks, its file and its record. Answers its id. 404
+  `projects.errors.document-not-found`.
+  """
+  deleteProjectDocument(
+    """The document's id."""
     id: ID! @constraint(maxLength: 64)
   ): ID!
   """
@@ -1173,6 +1237,15 @@ type Mutation {
     response: JSONObject!
   ): Passkey!
   """
+  Indexes a FAILED (or never started) document again and answers it PENDING. A
+  PDF cannot be retried: 409 `projects.errors.document-not-retryable`, also for
+  an INDEXED one. 404 `projects.errors.document-not-found`.
+  """
+  reindexProjectDocument(
+    """The document's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): ProjectDocument!
+  """
   Rejects a pending action: nothing runs. Answers an action already decided as it
   stands. 404 `conversations.errors.action-not-found`; 409
   `conversations.errors.action-expired` past its expiry (the action becomes EXPIRED).
@@ -1248,6 +1321,13 @@ type Mutation {
     id: ID! @constraint(maxLength: 64)
   ): Conversation!
   """
+  Brings back a project deleted less than 30 days ago (a live one is returned as it is). 404 `projects.errors.not-found` for an unknown one or one past the window.
+  """
+  restoreProject(
+    """The project's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Project!
+  """
   Cancels a pending invitation. Administrators only. 404 `invitations.errors.not-found`, 409 `invitations.errors.not-pending`.
   """
   revokeInvitation(
@@ -1291,6 +1371,19 @@ type Mutation {
     id: ID! @constraint(maxLength: 64)
     """The model the next message goes to."""
     modelId: String! @constraint(minLength: 1, maxLength: 200)
+  ): Conversation!
+  """
+  Puts one of the member's conversations in one of their live projects, or takes
+  it out of its project with a null `projectId`. From the next message on, runs
+  carry the project's instructions and the `search_project` tool. 404
+  `conversations.errors.not-found`; 404 `projects.errors.not-found` for an
+  unknown, deleted or another member's project.
+  """
+  setConversationProject(
+    """The conversation's id."""
+    id: ID! @constraint(maxLength: 64)
+    """The project, or null for none."""
+    projectId: ID @constraint(maxLength: 64)
   ): Conversation!
   """
   Sets the default monthly budget, in USD (0 to 100000; 0 allows no paid model). Administrators only.
@@ -1415,6 +1508,16 @@ type Mutation {
     """The changes."""
     input: UpdatePersonaInput!
   ): Persona!
+  """
+  Changes a project. 404 `projects.errors.not-found`; 409
+  `projects.errors.version-conflict` when `version` is not the current one.
+  """
+  updateProject(
+    """The project's id."""
+    id: ID! @constraint(maxLength: 64)
+    """What to change."""
+    input: UpdateProjectInput!
+  ): Project!
 }
 
 """A Nano ID: 21 characters of A-Z, a-z, 0-9, _ and -."""
@@ -1651,6 +1754,77 @@ scalar PositiveFloat
 scalar PositiveInt
 
 """
+A member's project (spec 4.7): instructions the model reads in every run of
+the project, the documents it searches, and the personas bound to it. Only its
+owner reads it: another member gets `projects.errors.not-found`, and so does the
+admin.
+"""
+type Project {
+  """When it was created."""
+  createdAt: DateTime!
+  """When it was deleted; null while it is live."""
+  deletedAt: DateTime
+  """The ids of its documents, oldest first."""
+  documentIds: [ID!]!
+  """Its documents, oldest first."""
+  documents: [ProjectDocument!]!
+  """The project's id."""
+  id: ID!
+  """
+  What the model is told about the project (the member's own notes), up to 4000 characters.
+  """
+  instructions: String!
+  """Its name, up to 80 characters."""
+  name: String!
+  """The ids of the member's personas bound to it."""
+  personaIds: [ID!]!
+  """
+  When a deleted project is purged for good, with its documents; null while it is live.
+  """
+  purgeAt: DateTime
+  """When it last changed."""
+  updatedAt: DateTime!
+  """The version an update names to lock on."""
+  version: Int!
+}
+
+"""
+A file of a project (spec 4.7): uploaded with `PUT /media/project-documents`
+(the file as the body, its name in `x-file-name` and the project's id in
+`x-project-id`; Markdown, plain text and PDF), which answers `{ id, key,
+contentType, size, name, status }`. The file is read at
+`GET /media/project-documents/<key>` by its owner alone. A PDF is stored but
+not searchable yet: it is FAILED with `errorCode` `PDF_TEXT_UNAVAILABLE`, until
+text extraction exists. Never a URL.
+"""
+type ProjectDocument {
+  """Its size in bytes."""
+  bytes: Int!
+  """How many chunks are searchable (0 until INDEXED)."""
+  chunkCount: Int!
+  """When it was uploaded."""
+  createdAt: DateTime!
+  """
+  Why it is FAILED, else null: `PDF_TEXT_UNAVAILABLE`, `NOT_TEXT`,
+  `EMPTY_DOCUMENT`, `FILE_MISSING`, `EMBEDDINGS_UNAVAILABLE`, `QUEUE_UNAVAILABLE`
+  or `INDEXING_FAILED`.
+  """
+  errorCode: String
+  """The document's id."""
+  id: ID!
+  """The media key of the file (never a URL)."""
+  key: String!
+  """The content type the server checked."""
+  mime: String!
+  """The name the file was uploaded with."""
+  name: String!
+  """The project it belongs to."""
+  projectId: ID!
+  """Where the indexing stands."""
+  status: DocumentStatus!
+}
+
+"""
 A write the model asked for (memory's `remember` and `forget`, later the MCP
 tools) that waits for the member's word (spec 4.8, 4.9). Only its owner reads
 it: another member gets `conversations.errors.action-not-found`, and so does the
@@ -1862,6 +2036,15 @@ type Query {
     """The conversation's id."""
     conversationId: ID! @constraint(maxLength: 64)
   ): [Message!]!
+  """
+  One of the member's live projects. 404 `projects.errors.not-found` for an unknown, deleted or another member's one (the admin's too).
+  """
+  project(
+    """The project's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Project!
+  """The member's live projects, most recently changed first, at most 50."""
+  projects: [Project!]!
   """
   The team's usage per member and per model for a month. Administrators only: 403 `auth.errors.forbidden`.
   """
@@ -2150,6 +2333,21 @@ input UpdatePersonaInput {
   visibility: PersonaVisibility
   """The voice it speaks with; null clears it."""
   voiceId: String @constraint(maxLength: 100)
+}
+
+"""
+What to change of a project. A field left out stays as it is; `name` and
+`instructions` given as null are refused (`validation.errors.required`).
+"""
+input UpdateProjectInput {
+  """The new instructions; at most 4000 characters once trimmed."""
+  instructions: String @constraint(maxLength: 8000)
+  """The new name."""
+  name: String @constraint(minLength: 1, maxLength: 80)
+  """
+  The version the client read: another write since is 409 `projects.errors.version-conflict`.
+  """
+  version: Int
 }
 
 """The signed-in member's usage for a month: figures only."""

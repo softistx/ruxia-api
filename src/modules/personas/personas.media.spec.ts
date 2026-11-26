@@ -148,6 +148,12 @@ describe("the persona avatars over /media", () => {
           },
           forget: async () => {},
         },
+        documents: {
+          mayRead: async () => false,
+          add: async () => {
+            throw new Error("db down");
+          },
+        },
         warn: () => {},
         throttle: unthrottled,
       },

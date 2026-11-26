@@ -24,6 +24,7 @@ import type {
   AvatarClaims,
   PersonaModels,
   PersonaOwner,
+  PersonaProjects,
 } from "../personas.integrity";
 import { createIssues, updateIssues } from "../personas.rules";
 import {
@@ -59,6 +60,7 @@ export class PersonasService {
     private readonly mongo: Pick<AppMongo, "as" | "db">,
     private readonly models: PersonaModels,
     private readonly avatars: AvatarClaims,
+    private readonly projects: PersonaProjects,
     private readonly viewer: Viewer | null,
     // A member's id and name, batched per request (`PersonaOwner`).
     private readonly owners: (id: string) => Promise<PersonaOwner>,
@@ -124,7 +126,11 @@ export class PersonasService {
   }
 
   async create(input: CreatePersonaInput): Promise<PersonaDocument> {
-    const issues = [...createIssues(input), ...(await this.linkIssues(input))];
+    const issues = [
+      ...createIssues(input),
+      ...(await this.linkIssues(input)),
+      ...(await this.projectIssues(input.projectIds)),
+    ];
     if (issues.length > 0) throw invalidInput(issues);
     await this.requireModel(input.defaultModelId);
     return this.personas.create({
@@ -153,6 +159,7 @@ export class PersonasService {
       ...(input.avatarKey !== persona.avatarKey
         ? await this.linkIssues(input)
         : []),
+      ...(await this.projectIssues(input.projectIds)),
     ];
     if (issues.length > 0) throw invalidInput(issues);
     if (
@@ -319,6 +326,31 @@ export class PersonasService {
     if (typeof key !== "string") return [];
     if (await this.avatars.uploadedBy(this.actor, key)) return [];
     return [{ path: "avatarKey", code: "validation.errors.invalid" } as const];
+  }
+
+  // Every project a persona is bound to is one of the viewer's own live ones:
+  // another member's, a deleted one or an unknown id is `projects.errors.not-found`
+  // on `projectIds.<i>`.
+  private async projectIssues(
+    ids: readonly string[] | null | undefined,
+  ): Promise<FieldIssue[]> {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const owned = await this.projects.owned(ids);
+    return ids.flatMap((id, index) =>
+      owned.has(id)
+        ? []
+        : [{ path: `projectIds.${index}`, code: "projects.errors.not-found" }],
+    );
+  }
+
+  // The ids of the viewer's own personas bound to a project.
+  async boundTo(projectId: string): Promise<string[]> {
+    const bound = await this.personas.findMany({
+      filter: { ownerId: this.actor, projectIds: projectId },
+      sort: { updatedAt: -1, _id: -1 },
+      limit: 200,
+    });
+    return bound.map((persona) => String(persona._id));
   }
 
   private async page(

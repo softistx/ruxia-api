@@ -1,0 +1,33 @@
+# mongot, MongoDB's search and vector search component (Community Edition),
+# for ruxia-api's `chunks_vector` index. Mounted at
+# /mongot-community/config.default.yml by docker-compose.yaml. Hostnames are the
+# compose services' container names on the internal `data` network.
+syncSource:
+  replicaSet:
+    hostAndPort: "ruxia-mongo:27017"
+    scramAuth:
+      username: "mongotUser"
+      passwordFile: "/run/secrets/mongot_password"
+      authSource: "admin"
+      tls:
+        enabled: false
+  replicationReader:
+    readPreference: "primaryPreferred"
+
+storage:
+  dataPath: "/data/mongot"
+
+server:
+  grpc:
+    address: "0.0.0.0:27028"
+    tls:
+      mode: "disabled"
+
+metrics:
+  enabled: false
+
+healthCheck:
+  address: "0.0.0.0:8080"
+
+logging:
+  verbosity: INFO

@@ -152,6 +152,15 @@ export const env = defineEnv(
       .transform((value) => value || undefined)
       .pipe(z.url({ protocol: /^https?$/ }).optional())
       .optional(),
+    // EMBED_BASE_URL: the Ollama that embeds the documents of the projects with
+    // `nomic-embed-text` (the VPS's `ollama-embed`, http://ruxia-ollama-embed:11434
+    // in the deploy compose). Unset, documents are FAILED `EMBEDDINGS_UNAVAILABLE`
+    // and `search_project` fails (src/modules/projects).
+    EMBED_BASE_URL: z
+      .string()
+      .transform((value) => value || undefined)
+      .pipe(z.url({ protocol: /^https?$/ }).optional())
+      .optional(),
     // ANTHROPIC_API_KEY: the key Claude models are called with. Optional:
     // unset, a send to a Claude model fails with a model error, nothing else
     // changes (src/modules/conversations).

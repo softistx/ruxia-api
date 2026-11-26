@@ -21,6 +21,7 @@ import type {
   ConversationMemory,
   ConversationModels,
   ConversationPersonas,
+  ConversationProjects,
 } from "../conversations.integrity";
 import { recorder } from "../conversations.recorder";
 import { systemOf } from "../conversations.rules";
@@ -54,6 +55,7 @@ export interface RunStartDeps {
   adapters: ModelAdapters;
   attachments: Pick<ConversationAttachments, "expand">;
   memory: ConversationMemory;
+  projects: ConversationProjects;
   runtime: ConversationsRuntime;
   idle: Pick<IdleService, "require">;
   observers: readonly AgentObserver[];
@@ -172,7 +174,8 @@ export class RunStartService {
 
   // The context folded to the model's window, the run over it, and the run
   // handed to the runtime under the viewer's id. The persona's remembered
-  // facts and the memory tools join the run when it keeps a memory; both are
+  // facts and the memory tools join the run when it keeps a memory, and the
+  // project's instructions and `search_project` when it has a project; all are
   // counted in the room the system prompt takes.
   private async launch(exchange: Started, persona: PersonaDocument) {
     const { messages, adapters, attachments, runtime, observers, now } =
@@ -180,14 +183,17 @@ export class RunStartService {
     const { conversation, user, assistant, model } = exchange;
     const adapter = adapters.adapterFor(model);
     const path = await messages.path(conversation, user._id);
-    const { facts, tools, observer } = await this.deps.memory.kit(
+    const kit = await this.deps.memory.kit(
       persona,
       path.flatMap((doc) => doc.parts),
     );
+    const project = await this.deps.projects.kit(conversation, persona);
+    const tools = [...kit.tools, ...project.tools];
     const base = {
       personality: persona.personality,
       locale: this.actor.locale,
-      memory: facts,
+      memory: kit.facts,
+      project: project.instructions,
     };
     const blocks = systemOf({ ...base, summary: null });
     const context = await messages.context(path, {
@@ -208,7 +214,7 @@ export class RunStartService {
       messages: context.messages,
       tools,
       proposalTtlMs: PROPOSAL_TTL_MS,
-      observers: [...observers, observer],
+      observers: [...observers, kit.observer],
       now: () => now().getTime(),
     });
     const recorded = recorder(run, (result, events, abortReason) =>

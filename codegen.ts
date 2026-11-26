@@ -38,6 +38,8 @@ const config: CodegenConfig = {
           Viewer: "@/auth/viewer#ViewerModel",
           Member: "@/modules/members#MemberDocument",
           Persona: "@/modules/personas/models#PersonaDocument",
+          Project: "@/modules/projects/models#ProjectRecord",
+          ProjectDocument: "@/modules/projects/models#FileRecord",
           Conversation: "@/modules/conversations/models#ConversationDocument",
           Message: "@/modules/conversations/models#MessageDocument",
           MemoryItem: "@/modules/memory/memory.model#MemoryItemDocument",

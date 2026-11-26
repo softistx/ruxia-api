@@ -2,12 +2,16 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ObjectId } from "mongodb";
 import { authApp, signedInAccount } from "~/auth";
 import { sessionViewer } from "~/execute";
+import type { Viewer } from "../../../auth/viewer";
 import { appMongo } from "../../../config/db";
 import { ModelsService, noStatuses } from "../../models";
+import { ProjectsService } from "../../projects";
 import { AvatarsService } from "./avatars.service";
 import { PersonasService } from "./personas.service";
 
 const kit = authApp();
+const projectsOf = (viewer: Viewer | null) =>
+  new ProjectsService(appMongo, viewer, () => new Date());
 const avatars = new AvatarsService(appMongo);
 const models = new ModelsService(appMongo, noStatuses, () => {});
 const model = "claude-sonnet-5-5";
@@ -37,12 +41,15 @@ async function member(
 ) {
   const account = await signedInAccount(kit, options);
   const viewer = await sessionViewer(kit, account.token);
+  const projects = projectsOf(viewer);
   return {
     id: account.userId,
+    projects,
     service: new PersonasService(
       appMongo,
       models,
       avatars,
+      projects,
       viewer,
       async (id) => ({
         id,
@@ -83,10 +90,11 @@ describe("PersonasService: own personas", () => {
   test("creates with defaults, lists newest first with a total, and finds", async () => {
     const ada = await member();
     const first = await create(ada.service, "Ada one");
+    const p1 = String((await ada.projects.create({ name: "P1" }))._id);
     await create(ada.service, "Ada two", {
       tagline: " A tagline ",
       tools: { webSearch: true, mcpServerIds: ["a", "a", "b"] },
-      projectIds: ["p1", "p1"],
+      projectIds: [p1, p1],
       voiceId: "voice-1",
     });
     expect(first).toMatchObject({
@@ -105,7 +113,7 @@ describe("PersonasService: own personas", () => {
     expect(page.edges[0]?.node.name).toBe("Ada two");
     expect(page.edges[0]?.node).toMatchObject({
       tagline: "A tagline",
-      projectIds: ["p1"],
+      projectIds: [p1],
       tools: { webSearch: true, mcpServerIds: ["a", "b"] },
     });
     expect((await ada.service.find(String(first._id))).name).toBe("Ada one");
@@ -348,11 +356,12 @@ describe("PersonasService: sharing with the team", () => {
 describe("PersonasService: duplicating", () => {
   test("copies a persona of one's own, PRIVATE, with its tools and projects", async () => {
     const ada = await member();
+    const pr1 = String((await ada.projects.create({ name: "Pr1" }))._id);
     const made = await create(ada.service, "Orig", {
       visibility: "TEAM",
       personality: "p",
       tools: { webSearch: true, mcpServerIds: ["m1"] },
-      projectIds: ["pr1"],
+      projectIds: [pr1],
     });
     const copy = await ada.service.duplicate(String(made._id));
     expect(copy).toMatchObject({
@@ -360,7 +369,7 @@ describe("PersonasService: duplicating", () => {
       ownerId: ada.id,
       visibility: "private",
       personality: "p",
-      projectIds: ["pr1"],
+      projectIds: [pr1],
       tools: { webSearch: true, mcpServerIds: ["m1"] },
     });
     expect(String(copy._id)).not.toBe(String(made._id));
@@ -369,13 +378,14 @@ describe("PersonasService: duplicating", () => {
   test("copies a team persona of another into one's own, without their servers and projects", async () => {
     const ada = await member();
     const bea = await member();
+    const pr1 = String((await ada.projects.create({ name: "Pr1" }))._id);
     const key = crypto.randomUUID();
     await avatars.record(ada.id, key);
     const made = await create(ada.service, "Shareable", {
       visibility: "TEAM",
       avatarKey: key,
       tools: { memory: true, mcpServerIds: ["m1"] },
-      projectIds: ["pr1"],
+      projectIds: [pr1],
     });
     const copy = await bea.service.duplicate(String(made._id));
     expect(copy).toMatchObject({
@@ -554,6 +564,7 @@ describe("PersonasService: the featured catalogue", () => {
       racing("findById", flip),
       models,
       avatars,
+      projectsOf(viewer),
       viewer,
       async (i) => ({ id: i, name: "x" }),
     );
@@ -585,6 +596,7 @@ describe("PersonasService: the featured catalogue", () => {
       racing("findMany", flip),
       models,
       avatars,
+      projectsOf(viewer),
       viewer,
       async (i) => ({ id: i, name: "x" }),
     );
@@ -624,5 +636,25 @@ describe("PersonasService: the featured catalogue", () => {
       id: ada.id,
       name: "Alice",
     });
+  });
+});
+
+describe("PersonasService: projects", () => {
+  test("boundTo lists the member's own personas bound to a project, and nobody else's", async () => {
+    const ada = await member();
+    const bea = await member();
+    const bound = await ada.service.create({
+      name: "Bound",
+      defaultModelId: model,
+      projectIds: [],
+    });
+    await ada.service.create({ name: "Free", defaultModelId: model });
+    const project = new ObjectId().toHexString();
+    await appMongo.db.personas.raw.updateOne(
+      { _id: bound._id },
+      { $set: { projectIds: [project] } },
+    );
+    expect(await ada.service.boundTo(project)).toEqual([String(bound._id)]);
+    expect(await bea.service.boundTo(project)).toEqual([]);
   });
 });

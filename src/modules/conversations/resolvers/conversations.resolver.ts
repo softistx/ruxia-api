@@ -24,6 +24,10 @@ export const conversations: Resolvers = {
       requireMember(ctx);
       return ctx.services.conversations.setModel(id, modelId);
     },
+    setConversationProject: (_, { id, projectId }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.conversations.setProject(id, projectId ?? null);
+    },
     deleteConversation: (_, { id }, ctx) => {
       requireMember(ctx);
       return ctx.services.conversations.delete(id);

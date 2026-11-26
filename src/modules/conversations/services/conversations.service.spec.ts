@@ -300,3 +300,61 @@ describe("delete, restore and the trash", () => {
     expect((await ada.conversations.delete(id)).deletedAt).toBeInstanceOf(Date);
   });
 });
+
+describe("ConversationsService: projects", () => {
+  test("joins one of the member's live projects, leaves it, and lists by it", async () => {
+    const ada = await memberOf(kit);
+    const sage = await ada.personas.create({
+      name: "Sage",
+      defaultModelId: sonnet,
+    });
+    const conversation = await ada.conversations.start({
+      personaId: String(sage._id),
+    });
+    const id = String(conversation._id);
+    const project = String((await ada.projects.create({ name: "P" }))._id);
+    expect((await ada.conversations.setProject(id, project)).projectId).toBe(
+      project,
+    );
+    expect((await ada.conversations.find(id)).projectId).toBe(project);
+    expect((await ada.conversations.setProject(id, null)).projectId).toBeNull();
+    await ada.conversations.setProject(id, project);
+    await ada.runMessages.insertExchange({
+      conversation,
+      parentId: null,
+      text: "hi",
+      modelId: sonnet,
+    });
+    const listed = await ada.conversations.list({
+      filter: { projectId: project },
+    });
+    expect(listed.edges.map((edge) => String(edge.node._id))).toEqual([id]);
+    expect(
+      (await ada.conversations.list({ filter: { projectId: "junk" } }))
+        .totalCount,
+    ).toBe(0);
+  });
+
+  test("refuses a project that is deleted, another member's or unknown, and another member's conversation", async () => {
+    const ada = await memberOf(kit);
+    const bea = await memberOf(kit);
+    const sage = await ada.personas.create({
+      name: "Sage",
+      defaultModelId: sonnet,
+    });
+    const id = String(
+      (await ada.conversations.start({ personaId: String(sage._id) }))._id,
+    );
+    const hers = String((await bea.projects.create({ name: "Hers" }))._id);
+    const gone = String((await ada.projects.create({ name: "Gone" }))._id);
+    await ada.projects.delete(gone);
+    for (const projectId of [hers, gone, "junk"]) {
+      await expect(
+        ada.conversations.setProject(id, projectId),
+      ).rejects.toMatchObject(refused("projects.errors.not-found"));
+    }
+    await expect(bea.conversations.setProject(id, hers)).rejects.toMatchObject(
+      refused("conversations.errors.not-found"),
+    );
+  });
+});

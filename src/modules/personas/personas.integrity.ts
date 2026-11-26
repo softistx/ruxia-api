@@ -18,3 +18,9 @@ export interface PersonaOwner {
   id: string;
   name: string;
 }
+
+// Which of the ids are the member's own live projects: what a persona may be
+// bound to. `ProjectsService` implements it.
+export interface PersonaProjects {
+  owned(ids: readonly string[]): Promise<ReadonlySet<string>>;
+}

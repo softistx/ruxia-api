@@ -22,6 +22,7 @@ import { noStatuses, type StatusStore } from "../src/modules/models";
 import { background } from "../src/shared/background";
 import { fakeAdapters } from "./conversations";
 import { memoryBucket } from "./media";
+import { projectPorts } from "./projects";
 
 export const uiOrigin = "https://ui.ruxia.test";
 
@@ -50,6 +51,7 @@ export function authApp(
     observers = [],
     heartbeatMs,
     now,
+    projects = projectPorts(),
   }: {
     // Where the fixed clock starts (the real now by default): a spec about a
     // fixed window starts it inside one, so moving the clock cannot cross it.
@@ -67,6 +69,8 @@ export function authApp(
     observers?: readonly AgentObserver[];
     heartbeatMs?: number;
     now?: () => Date;
+    // The projects' fakes (embeddings, vector index, queue): one set by default.
+    projects?: ReturnType<typeof projectPorts>;
   } = {},
 ) {
   const clock = fixedClock(startAt);
@@ -92,6 +96,9 @@ export function authApp(
     runtime,
     observers,
     adapters,
+    embedder: projects.embedder,
+    vectors: projects.vectors,
+    indexQueue: projects.queue,
     ...(heartbeatMs !== undefined && { heartbeatMs }),
     ...(now && { now }),
   });
@@ -106,7 +113,7 @@ export function authApp(
         ...(options.language && { "accept-language": options.language }),
       },
     });
-  return { auth, app, mailer, clock, client, runtime, adapters };
+  return { auth, app, mailer, clock, client, runtime, adapters, projects };
 }
 
 export type AuthApp = ReturnType<typeof authApp>;

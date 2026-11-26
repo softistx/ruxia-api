@@ -1,4 +1,5 @@
 import { isAttachment } from "../attachments";
+import { citationsOf } from "../projects/projects.utils";
 import type { ActionStatus, MessageDocument, StoredPart } from "./models";
 
 // The parts a client may see: text and thinking, tagged for the union (the
@@ -7,6 +8,13 @@ export type ShownPart =
   | { __typename: "MessageTextPart"; text: string }
   | { __typename: "MessageThinkingPart"; text: string }
   | ({ __typename: "MessageAttachmentPart" } & ShownAttachment)
+  | {
+      __typename: "MessageCitationPart";
+      documentId: string;
+      name: string;
+      snippet: string;
+      score: number;
+    }
   | {
       __typename: "MessageProposedActionPart";
       actionId: string;
@@ -54,6 +62,12 @@ export const shownParts = (
       return part.redacted === undefined
         ? [{ __typename: "MessageThinkingPart" as const, text: part.text }]
         : [];
+    }
+    if (part.type === "tool-result") {
+      return citationsOf(part).map((cited) => ({
+        __typename: "MessageCitationPart" as const,
+        ...cited,
+      }));
     }
     if (isAttachment(part)) {
       return [

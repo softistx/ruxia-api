@@ -68,6 +68,12 @@ const CATALOGUE_QUERY = graphql(`
   }
 `);
 
+const CREATE_PROJECT_MUTATION = graphql(`
+  mutation PersonaSpecProject($name: String!) {
+    createProject(input: { name: $name }) { id }
+  }
+`);
+
 beforeAll(() => appMongo.db.personas.raw.deleteMany({}));
 
 const model = "claude-sonnet-5-5";
@@ -77,13 +83,17 @@ describe("personas over /graphql", () => {
     const kit = authApp();
     const ada = await signedInAccount(kit);
     const client = kit.client(ada.token);
+    const bound = await client.query(CREATE_PROJECT_MUTATION, {
+      variables: { name: "P1" },
+    });
+    const p1 = bound.data?.createProject.id ?? "";
     const created = await client.query(CREATE_PERSONA_MUTATION, {
       variables: {
         input: {
           name: "Sage",
           defaultModelId: model,
           tools: { webSearch: true },
-          projectIds: ["p1"],
+          projectIds: [p1],
         },
       },
     });
@@ -95,7 +105,7 @@ describe("personas over /graphql", () => {
       visibility: "PRIVATE",
       featured: false,
       tools: { webSearch: true, mcpServerIds: [] },
-      projectIds: ["p1"],
+      projectIds: [p1],
     });
     const id = persona?.id ?? "";
     const stale = persona?.version ?? 0;

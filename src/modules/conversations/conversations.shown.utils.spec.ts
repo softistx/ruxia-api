@@ -73,3 +73,49 @@ describe("role and status", () => {
     expect(shownStatus("streaming")).toBe("STREAMING");
   });
 });
+
+describe("citations in parts", () => {
+  const result = (name: string, output: unknown): StoredPart => ({
+    type: "tool-result",
+    callId: "c",
+    name,
+    isError: false,
+    output,
+  });
+  const cited = {
+    documentId: "d1",
+    name: "Notes.md",
+    snippet: "hi",
+    score: 0.8,
+  };
+
+  test("a search_project result shows one citation per passage, in place", () => {
+    expect(
+      shownParts(
+        [
+          { type: "text", text: "Before" },
+          result("search_project", {
+            notice: "x",
+            results: [cited, { ...cited, documentId: "d2" }],
+          }),
+          { type: "text", text: "After" },
+        ],
+        new Map(),
+      ),
+    ).toEqual([
+      { __typename: "MessageTextPart", text: "Before" },
+      { __typename: "MessageCitationPart", ...cited },
+      { __typename: "MessageCitationPart", ...cited, documentId: "d2" },
+      { __typename: "MessageTextPart", text: "After" },
+    ]);
+  });
+
+  test("any other tool result stays hidden, and so does an unreadable one", () => {
+    expect(shownParts([result("remember", { id: "a" })], new Map())).toEqual(
+      [],
+    );
+    expect(shownParts([result("search_project", "junk")], new Map())).toEqual(
+      [],
+    );
+  });
+});

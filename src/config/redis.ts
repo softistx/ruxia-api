@@ -1,4 +1,4 @@
-import { defineRedis, openRedis } from "@softistx/redis";
+import { defineRedis, localQueues, openRedis } from "@softistx/redis";
 import { RedisClient } from "bun";
 import * as caches from "../limits/caches";
 import * as limits from "../limits/limits";
@@ -9,6 +9,7 @@ import {
   type StatusStore,
 } from "../modules/models/models.status";
 import { env } from "./env";
+import * as queues from "./queues";
 
 // The app's Redis, for the rate limits, at `uri`. It never waits for Redis:
 // the client is handed to `openRedis` unconnected (`client`, which the package
@@ -32,6 +33,7 @@ export async function openAppRedis(
       prefix: "ruxia",
       limits,
       caches,
+      queues,
       background: {
         onDown: () => log("redis unavailable: rate limits degraded"),
         onUp: () => log("redis is back"),
@@ -66,3 +68,9 @@ export const serverThrottle: Throttle =
 // model then reads unavailable).
 export const serverStatuses: StatusStore =
   redis === undefined ? noStatuses : redisStatuses(redis.cache.models);
+
+// The background queues the server runs: over Redis (jobs survive a restart and
+// retry on any process), or, without `REDIS_URL` (development), in this process
+// with the same definitions (`localQueues`: a job is lost on restart).
+export const serverQueues =
+  redis === undefined ? localQueues({ queues }).queues : redis.queues;

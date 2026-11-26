@@ -70,17 +70,20 @@ export const languageName = (locale: string) =>
 
 // What the model is told before the conversation: the persona's personality
 // (when it has one), the language to answer in, and what an earlier fold of
-// the conversation kept, and the persona's remembered facts (already framed
-// as data, see `factsOf`).
+// the conversation kept, the project's instructions (already framed as the
+// member's notes, see `projectBlock`) and the persona's remembered facts
+// (already framed as data, see `factsOf`).
 export const systemOf = (input: {
   personality: string;
   locale: string;
   summary: string | null;
   memory: string | null;
+  project: string | null;
 }): SystemBlock[] =>
   [
     input.personality.trim(),
     `Reply in ${languageName(input.locale)}.`,
+    input.project ?? "",
     input.memory ?? "",
     input.summary === null
       ? ""

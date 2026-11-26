@@ -9,10 +9,12 @@ import type { Auth } from "./auth/auth";
 import { janusViewer, type Viewer } from "./auth/viewer";
 import { serverAuth } from "./config/auth";
 import { appMongo, closeDatabases } from "./config/db";
+import { serverEmbedder } from "./config/embeddings";
 import { env } from "./config/env";
 import { serverMedia } from "./config/media";
 import { serverModels } from "./config/models";
 import { redis, serverStatuses, serverThrottle } from "./config/redis";
+import { serverIndexQueue, serverVectors } from "./config/vectors";
 import { type Base, type BaseOptions, createBase } from "./http/context";
 import { clientHeader } from "./http/csrf";
 import { graphqlPlugins } from "./http/graphql-plugins";
@@ -29,6 +31,12 @@ import {
 import { appMedia } from "./modules/media";
 import type { StatusStore } from "./modules/models";
 import { AvatarsService } from "./modules/personas";
+import {
+  DocumentFiles,
+  type IndexQueue,
+  type ProjectEmbedder,
+  type VectorIndex,
+} from "./modules/projects";
 import { type Services, services } from "./modules/services";
 import { cataloguesLoaded } from "./modules/translations";
 
@@ -88,6 +96,11 @@ export type AppOptions = BaseOptions &
     titleModelId?: string;
     // The private bucket of the media routes: `S3_*`'s by default.
     media?: MediaBucket;
+    // The projects' ports: `EMBED_BASE_URL`'s embeddings, the MongoDB vector
+    // index and the indexing queue, by default.
+    embedder?: ProjectEmbedder;
+    vectors?: VectorIndex;
+    indexQueue?: IndexQueue;
     catalogues?: () => boolean;
   };
 
@@ -108,6 +121,9 @@ export function createApp(options: AppOptions = {}) {
   const throttle = options.throttle ?? serverThrottle;
   const statuses = options.statuses ?? serverStatuses;
   const media = options.media ?? serverMedia;
+  const embedder = options.embedder ?? serverEmbedder;
+  const vectors = options.vectors ?? serverVectors;
+  const indexQueue = options.indexQueue ?? serverIndexQueue;
   const adapters = options.adapters ?? serverModels;
   const now = options.now ?? (() => new Date());
   const titleModelId = options.titleModelId ?? env.TITLE_MODEL_ID;
@@ -122,6 +138,9 @@ export function createApp(options: AppOptions = {}) {
     runtime,
     observers,
     media,
+    embedder,
+    vectors,
+    indexQueue,
     now,
   });
   return (
@@ -136,7 +155,7 @@ export function createApp(options: AppOptions = {}) {
       // The files, beside /graphql (the persona avatars and the exports of
       // conversations): the viewer is resolved above, the kinds' callbacks
       // read it. Mounted before the body limit, which is /graphql's.
-      .plugin(filesOf(throttle, media))
+      .plugin(filesOf(throttle, media, indexQueue))
       // A body past 100 KiB is refused (413) before it is read, for /graphql
       // below: a query is a few kilobytes (alxia's production guide, "Cap the body").
       .bodyLimit(BODY_LIMIT)
@@ -163,13 +182,21 @@ function servicesFactory(
     services({ ...shared, request, viewer, clientIp: ip });
 }
 
-// The files beside /graphql: the persona avatars and the conversation exports.
-function filesOf(throttle: Throttle, media: MediaBucket) {
+// The files beside /graphql: the persona avatars, the conversation exports, the
+// attachments and the project documents.
+function filesOf(
+  throttle: Throttle,
+  media: MediaBucket,
+  indexQueue: IndexQueue,
+) {
   return appMedia(
     {
       avatars: new AvatarsService(appMongo),
       exports: new ExportFiles(appMongo),
       attachments: new AttachmentFiles(appMongo),
+      documents: new DocumentFiles(appMongo, indexQueue, (message) =>
+        console.warn(message),
+      ),
       warn: (message) => console.warn(message),
       throttle,
     },
