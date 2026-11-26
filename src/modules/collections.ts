@@ -6,6 +6,11 @@
 
 export { roleLocks } from "../auth/roles.model";
 export {
+  budgetAlerts,
+  budgetSettings,
+  memberBudgets,
+} from "./budgets/budgets.model";
+export {
   conversationExports,
   conversations,
   messages,

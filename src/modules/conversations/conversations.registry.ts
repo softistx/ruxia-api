@@ -5,6 +5,7 @@ import type { Throttle } from "../../limits/throttle";
 import type { Background } from "../../shared/background";
 import type { ModelAdapters } from "./conversations.adapters";
 import type {
+  ConversationBudgets,
   ConversationModels,
   ConversationPersonas,
 } from "./conversations.integrity";
@@ -26,6 +27,7 @@ export type ConversationsDeps = {
   mongo: AppMongo;
   viewer: Viewer | null;
   models: ConversationModels;
+  budgets: ConversationBudgets;
   personas: ConversationPersonas;
   adapters: ModelAdapters;
   titleModelId: string;
@@ -64,6 +66,7 @@ function runServices(deps: ConversationsDeps, shared: Shared) {
       ...shared,
       titles,
       models,
+      budgets: deps.budgets,
       personas,
       adapters: deps.adapters,
       runtime: deps.runtime,

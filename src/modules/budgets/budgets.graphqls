@@ -1,0 +1,158 @@
+"""
+Where the signed-in member stands against its monthly budget (docs/spec.md,
+section 4.12). The month is the calendar month in America/Toronto. At 80 % the
+member is alerted once (`alertedAt`, and a mail); at 100 % a send to a paid
+model is refused with 409 `budgets.errors.exhausted` and local models stay
+usable. A run already started finishes and records its cost, so the spend may
+pass the budget by that run.
+"""
+type BudgetStatus {
+  "The month, `YYYY-MM`."
+  month: String!
+  "What the member's replies cost this month, in USD."
+  spentUsd: Float!
+  "The member's budget for the month, in USD: its own, else the team default."
+  budgetUsd: Float!
+  "How much of the budget is spent, in percent; may pass 100."
+  percent: Float!
+  "Whether a send to a paid model is refused (the spend reached the budget)."
+  exhausted: Boolean!
+  "When the 80 % alert of the month was raised; null while it has not been."
+  alertedAt: DateTime
+  "When the month ends and the spend starts again at 0."
+  resetsAt: DateTime!
+}
+
+"What the replies of one model cost, and the tokens they used."
+type ModelUsage {
+  "The model's id, as the catalogue names it."
+  modelId: String!
+  "The cost, in USD."
+  spentUsd: Float!
+  "How many replies."
+  messages: Int!
+  "Input tokens."
+  inputTokens: Int!
+  "Output tokens."
+  outputTokens: Int!
+  "Tokens read from the cache."
+  cacheReadTokens: Int!
+  "Tokens written to the cache."
+  cacheWriteTokens: Int!
+  "Web searches."
+  webSearches: Int!
+}
+
+"The signed-in member's usage for a month: figures only."
+type Usage {
+  "The month, `YYYY-MM`."
+  month: String!
+  "What the replies cost, in USD."
+  spentUsd: Float!
+  "The month's budget, in USD."
+  budgetUsd: Float!
+  "How much of the budget is spent, in percent."
+  percent: Float!
+  "How many replies."
+  messages: Int!
+  "Input tokens."
+  inputTokens: Int!
+  "Output tokens."
+  outputTokens: Int!
+  "Tokens read from the cache."
+  cacheReadTokens: Int!
+  "Tokens written to the cache."
+  cacheWriteTokens: Int!
+  "Web searches."
+  webSearches: Int!
+  "The same figures per model, the dearest first."
+  models: [ModelUsage!]!
+}
+
+"One member's month in the team's usage: figures only, no conversation."
+type MemberUsage {
+  "The member's id."
+  memberId: ID!
+  "The member's name."
+  name: String!
+  "What the member's replies cost, in USD."
+  spentUsd: Float!
+  "The member's budget for the month, in USD."
+  budgetUsd: Float!
+  "How much of the budget is spent, in percent."
+  percent: Float!
+  "Whether the budget is the member's own (true) or the team default."
+  customBudget: Boolean!
+}
+
+"The team's usage for a month: figures only, never content or titles."
+type TeamUsage {
+  "The month, `YYYY-MM`."
+  month: String!
+  "What the whole team spent, in USD."
+  spentUsd: Float!
+  "The default monthly budget, in USD."
+  defaultBudgetUsd: Float!
+  "Every member, the biggest spender first."
+  members: [MemberUsage!]!
+  "The team's figures per model, the dearest first."
+  models: [ModelUsage!]!
+}
+
+"The team's budget settings."
+type BudgetSettings {
+  "The monthly budget of a member with none of its own, in USD."
+  defaultMonthlyUsd: Float!
+}
+
+"A member's own budget."
+type MemberBudget {
+  "The member's id."
+  memberId: ID!
+  "The member's own monthly budget in USD; null when it follows the default."
+  monthlyUsd: Float
+  "The budget that applies, in USD."
+  effectiveUsd: Float!
+}
+
+extend type Viewer {
+  "Where the member stands against its budget this month."
+  budgetStatus: BudgetStatus!
+}
+
+extend type Query {
+  "The signed-in member's usage for a month (`YYYY-MM`, default the current month in America/Toronto)."
+  usage(
+    "The month, `YYYY-MM`."
+    month: String @constraint(pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$")
+  ): Usage!
+
+  "The team's usage per member and per model for a month. Administrators only: 403 `auth.errors.forbidden`."
+  teamUsage(
+    "The month, `YYYY-MM`; default the current month."
+    month: String @constraint(pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$")
+  ): TeamUsage!
+
+  "The team's budget settings. Administrators only."
+  budgetSettings: BudgetSettings!
+}
+
+extend type Mutation {
+  "Sets the default monthly budget, in USD (0 to 100000; 0 allows no paid model). Administrators only."
+  setDefaultBudget(
+    "The default monthly budget, in USD."
+    monthlyUsd: Float! @constraint(min: 0, max: 100000)
+  ): BudgetSettings!
+
+  """
+  Sets a member's own monthly budget in USD, or null to follow the default.
+  A raised budget lifts a refusal at once. Administrators only. 404
+  `members.errors.not-found`.
+  """
+  setMemberBudget(
+    "The member's id."
+    memberId: ID! @constraint(maxLength: 64)
+    "The member's monthly budget in USD (0 to 100000); null follows the default."
+    monthlyUsd: Float @constraint(min: 0, max: 100000)
+  ): MemberBudget!
+}

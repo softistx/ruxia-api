@@ -144,6 +144,18 @@ export const messages = defineCollection({
       name: "messages_pinned",
       partialFilterExpression: { pinned: true },
     },
+    // The budgets' spend (one aggregate over the assistant messages of a
+    // window): a member's month, and the team's.
+    {
+      key: { ownerId: 1, createdAt: 1 },
+      name: "messages_spend",
+      partialFilterExpression: { role: "assistant" },
+    },
+    {
+      key: { createdAt: 1, ownerId: 1 },
+      name: "messages_spend_team",
+      partialFilterExpression: { role: "assistant" },
+    },
     {
       key: { status: 1 },
       name: "messages_streaming",

@@ -12,6 +12,7 @@ import { unavailable } from "../../../shared/errors";
 import type { ModelAdapters } from "../conversations.adapters";
 import { limitedSend, personaUnavailable } from "../conversations.errors";
 import type {
+  ConversationBudgets,
   ConversationModels,
   ConversationPersonas,
 } from "../conversations.integrity";
@@ -40,6 +41,7 @@ export interface RunStartDeps {
   >;
   titles: Pick<TitlesService, "name">;
   models: ConversationModels;
+  budgets: ConversationBudgets;
   personas: ConversationPersonas;
   adapters: ModelAdapters;
   runtime: ConversationsRuntime;
@@ -76,11 +78,16 @@ export class RunStartService {
   }
 
   // The send's first checks: its limit, the member's conversation, no answer
-  // being written.
-  async admit(conversationId: string) {
-    await limitedSend(this.deps.sends(this.actor.id));
-    const conversation = await this.deps.conversations.find(conversationId);
-    await this.deps.idle.require(conversation);
+  // being written, and the budget: a send to a paid model is refused once the
+  // month's spend has reached it (`modelId` is the model asked for, else the
+  // conversation's). An unknown model is left to the exchange to refuse.
+  async admit(conversationId: string, modelId?: string) {
+    const { sends, conversations, idle, models, budgets } = this.deps;
+    await limitedSend(sends(this.actor.id));
+    const conversation = await conversations.find(conversationId);
+    await idle.require(conversation);
+    const provider = await models.providerOf(modelId ?? conversation.modelId);
+    if (provider !== undefined) await budgets.requireWithin(provider);
     return conversation;
   }
 

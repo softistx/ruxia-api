@@ -14,6 +14,7 @@ test("builds the nine conversations services, wired to the viewer", async () => 
     mongo: appMongo,
     viewer: ada.viewer,
     models: ada.deps.models,
+    budgets: ada.budgets,
     personas: ada.deps.personas,
     adapters: adaptersByModel({}),
     titleModelId: "claude-haiku-5-5",

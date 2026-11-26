@@ -65,24 +65,9 @@ input MemberSettingsInput {
   rememberWithoutAsking: Boolean
 }
 
-"""
-Where the member stands against its budget. A placeholder until budgets land
-(spec 4.12): no limit, nothing spent.
-"""
-type BudgetStatus {
-  "Whether a limit applies to the member."
-  limited: Boolean!
-  "What the member spent this period, in cents."
-  usedCents: Int!
-  "The period's limit in cents; null without one."
-  limitCents: Int
-}
-
 extend type Viewer {
   "The member's own settings."
   settings: MemberSettings!
-  "The member's budget status."
-  budget: BudgetStatus!
 }
 
 extend type Query {
