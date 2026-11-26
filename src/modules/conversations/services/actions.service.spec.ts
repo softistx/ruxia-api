@@ -663,3 +663,105 @@ describe("the model's history and the outcomes", () => {
     );
   });
 });
+
+describe("where an outcome reaches the model", () => {
+  // Three sends; the proposal is made by the first, and `decide` runs between
+  // the second and the third. Returns the model's requests.
+  async function sends(
+    decide: (ada: Member, actionId: string) => Promise<unknown>,
+  ) {
+    const model = fakeModel([
+      {
+        toolCalls: [{ name: "remember", input: { text: "Likes tea" } }],
+        usage,
+      },
+      { text: "Waiting", usage },
+      { text: "Second", usage },
+      { text: "Third", usage },
+      { text: "Fourth", usage },
+    ]);
+    const ada = await memberOf(kit, {
+      adapters: adaptersByModel({
+        [sonnet]: model,
+        "claude-haiku-5-5": fakeModel([{ object: { title: "T" }, usage }]),
+      }),
+    });
+    const sage = await ada.personas.create({
+      name: "Sage",
+      defaultModelId: sonnet,
+      tools: { memory: true },
+    });
+    const conversation = await ada.conversations.start({
+      personaId: String(sage._id),
+    });
+    const id = String(conversation._id);
+    const send = async (text: string) => {
+      const sent = await ada.runs.send({ conversationId: id, text });
+      await ada.runtime.settled(sent.runId);
+      await kit.auth.background.settled();
+    };
+    await send("One");
+    const action = await firstPending(ada, id);
+    await send("Two");
+    await decide(ada, String(action._id));
+    await send("Three");
+    await send("Four");
+    return model.requests;
+  }
+
+  const userTexts = (
+    request:
+      | { messages: readonly { role: string; parts: readonly unknown[] }[] }
+      | undefined,
+  ) =>
+    (request?.messages ?? [])
+      .filter((m) => m.role === "user")
+      .map((m) => JSON.stringify(m.parts));
+
+  test("an action decided after a later message was answered reaches the model at the next send, and changes none of the earlier messages", async () => {
+    const requests = await sends((ada, id) => ada.actions.reject(id));
+    // Request 2 is the second send (no decision yet): no outcome anywhere.
+    expect(userTexts(requests[2]).join()).not.toContain("action outcome");
+    // Request 3 is the third send: the outcome heads "Three" only.
+    const third = userTexts(requests[3]);
+    expect(third).toHaveLength(3);
+    expect(third[0]).not.toContain("action outcome");
+    expect(third[1]).not.toContain("action outcome");
+    expect(third[2]).toContain("action outcome");
+    expect(third[2]).toContain("Three");
+    // The earlier messages are byte for byte what the second send saw.
+    expect(third.slice(0, 2)).toEqual(userTexts(requests[2]).slice(0, 2));
+  });
+
+  test("the outcome stays where it was told: the fourth send repeats it on the third message", async () => {
+    const requests = await sends((ada, id) => ada.actions.confirm(id));
+    const fourth = userTexts(requests[4]);
+    expect(fourth).toHaveLength(4);
+    expect(fourth[2]).toContain("action outcome");
+    expect(fourth[3]).not.toContain("action outcome");
+    expect(fourth[2]).toEqual(userTexts(requests[3])[2]);
+  });
+
+  test("an action whose own message was folded away before it was decided still reaches the model", async () => {
+    // Folding does not matter for the place: it is the current message, always
+    // in the context. A summary stored on the answer would swallow the message
+    // that followed it; the outcome is not looked up there.
+    const requests = await sends(async (ada, id) => {
+      const action = await ada.actions.find(id);
+      await appMongo.db.messages.raw.updateOne(
+        { _id: action.messageId },
+        {
+          $set: {
+            contextSummary: {
+              text: "so far",
+              tokens: 1,
+              createdAt: new Date(),
+            },
+          },
+        },
+      );
+      await ada.actions.reject(id);
+    });
+    expect(userTexts(requests[3]).join()).toContain("action outcome");
+  });
+});

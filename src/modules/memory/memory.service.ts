@@ -8,7 +8,13 @@ import type { PersonaDocument } from "../personas/models";
 import { itemNotFound, memoryFull } from "./memory.errors";
 import type { MemoryMembers, MemoryPersonas } from "./memory.integrity";
 import type { MemoryItemDocument, MemorySource } from "./memory.model";
-import { factsOf, MAX_ITEMS, MEMORY_TOOLS, textIssues } from "./memory.rules";
+import {
+  factsOf,
+  MAX_ITEMS,
+  MEMORY_TOOLS,
+  taintedBy,
+  textIssues,
+} from "./memory.rules";
 import { memoryTools } from "./memory.tools";
 
 // What a run takes of the memory: the facts for the system prompt and the
@@ -127,14 +133,17 @@ export class MemoryService {
 
   // What a run gives the persona: its facts and the `remember` and `forget`
   // tools, only when the persona enables memory. `remember` runs without a
-  // proposal when the member chose to remember without asking.
+  // proposal when the member chose to remember without asking, unless the
+  // conversation so far (`history`, the parts of the path) or the run holds
+  // output of a tool that is not the memory's.
   async kit(
     persona: Pick<PersonaDocument, "_id" | "tools">,
+    history: readonly { type: string; name?: string }[] = [],
   ): Promise<MemoryKit> {
     if (!persona.tools.memory) return { facts: null, tools: [], observer: {} };
     const items = await this.itemsOf(persona._id);
     const { settings } = await this.members.mine();
-    const run = { tainted: false };
+    const run = { tainted: taintedBy(history) };
     const taint = (call: { name: string }) => {
       if (!(MEMORY_TOOLS as readonly string[]).includes(call.name)) {
         run.tainted = true;

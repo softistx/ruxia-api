@@ -80,8 +80,11 @@ export function memoryTools(input: {
       }
     },
   });
-  // Read when the model calls it: proposed unless the member remembers without
-  // asking and nothing untrusted has reached the run.
+  // Temporary, until softistx/ai#221: `confirm` is read once per tool, not per
+  // call, so a getter lets the loop read it at each call; an SDK that copies
+  // the tools would freeze it (memory.service.spec runs the real `runAgent`).
+  // Proposed unless the member remembers without asking and nothing untrusted
+  // has reached the run.
   Object.defineProperty(remember, "confirm", {
     get: () => !auto || tainted(),
   });

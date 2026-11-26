@@ -1173,7 +1173,9 @@ type Mutation {
     response: JSONObject!
   ): Passkey!
   """
-  Rejects a pending action: nothing runs. Answers an action already decided as it stands.
+  Rejects a pending action: nothing runs. Answers an action already decided as it
+  stands. 404 `conversations.errors.action-not-found`; 409
+  `conversations.errors.action-expired` past its expiry (the action becomes EXPIRED).
   """
   rejectAction(
     """The action's id."""

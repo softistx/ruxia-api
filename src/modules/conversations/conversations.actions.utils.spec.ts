@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import {
   actionDocs,
   PROPOSAL_TTL_MS,
+  placementsOf,
   prefaceOf,
   proposalsIn,
   refusedResult,
@@ -90,18 +91,14 @@ describe("actionDocs", () => {
   });
 });
 
-describe("prefaceOf", () => {
+describe("placementsOf and prefaceOf", () => {
   const now = new Date("2026-12-01T10:00:00Z");
-  const assistant = {
-    _id: new ObjectId(),
-    role: "assistant",
-    parts: [proposal],
-  } as unknown as MessageDocument;
-  const user = {
-    _id: new ObjectId(),
-    role: "user",
-    parts: [],
-  } as unknown as MessageDocument;
+  const doc = (role: "user" | "assistant", parts: StoredPart[] = []) =>
+    ({ _id: new ObjectId(), role, parts }) as unknown as MessageDocument;
+  const assistant = doc("assistant", [proposal]);
+  const first = doc("user");
+  const leaf = doc("user");
+  const path = [first, assistant, leaf];
   const action = (status: string, extra = {}) =>
     ({
       messageId: assistant._id,
@@ -112,21 +109,48 @@ describe("prefaceOf", () => {
       expiresAt: new Date(now.getTime() + 60_000),
       updatedAt: now,
       result: null,
+      toldOn: null,
       status,
       ...extra,
     }) as unknown as ProposedActionDocument;
+  const placed = (
+    actions: ProposedActionDocument[],
+    fresh = true,
+    on: MessageDocument[] = path,
+  ) => placementsOf(on, actions, now, fresh).map((p) => p.userId);
 
-  test("a rejected action's outcome heads the next member message", () => {
-    const preface = prefaceOf([assistant, user], [action("rejected")], now);
-    const parts = preface.get(String(user._id)) ?? [];
-    expect(parts).toHaveLength(1);
-    expect(JSON.stringify(parts)).toContain(
-      "[application event: action outcome]",
-    );
-    expect(JSON.stringify(parts)).toContain("rejected");
+  test("an outcome not yet told heads the current member message, the leaf", () => {
+    expect(placed([action("rejected")])).toEqual([String(leaf._id)]);
   });
 
-  test("a confirmed one carries the tool's output, an expired one says so", () => {
+  test("an action decided after the next message was answered still goes to the leaf, never back to it", () => {
+    // `first` is old; the proposing answer's next member message is `leaf`.
+    expect(placed([action("confirmed")])).not.toContain(String(first._id));
+  });
+
+  test("an outcome already told stays where it was told while that message is on the path", () => {
+    const told = action("rejected", { toldOn: first._id });
+    expect(placed([told])).toEqual([String(first._id)]);
+    // On another branch it is told at the leaf, without being moved.
+    expect(placed([told], true, [doc("user"), assistant, leaf])).toEqual([
+      String(leaf._id),
+    ]);
+  });
+
+  test("a leaf that already has an answer is never changed: the outcome waits", () => {
+    expect(placed([action("rejected")], false)).toEqual([]);
+    expect(placed([action("rejected")], true, [first, assistant])).toEqual([]);
+  });
+
+  test("pending and running say nothing yet; an expired one says so", () => {
+    expect(placed([action("pending")])).toEqual([]);
+    expect(placed([action("running")])).toEqual([]);
+    expect(
+      placed([action("pending", { expiresAt: new Date(now.getTime() - 1) })]),
+    ).toEqual([String(leaf._id)]);
+  });
+
+  test("prefaceOf writes the SDK's outcome text under the message it heads", () => {
     const result = {
       type: "tool-result",
       callId: "call_0_0",
@@ -134,24 +158,21 @@ describe("prefaceOf", () => {
       isError: false,
       output: { id: "m1" },
     };
-    const confirmed = prefaceOf(
-      [assistant, user],
-      [action("confirmed", { result })],
+    const preface = prefaceOf(
+      placementsOf(path, [action("confirmed", { result })], now, true),
       now,
     );
-    expect(JSON.stringify(confirmed.get(String(user._id)))).toContain("m1");
-    const expired = prefaceOf(
-      [assistant, user],
-      [action("pending", { expiresAt: new Date(now.getTime() - 1) })],
+    const text = JSON.stringify(preface.get(String(leaf._id)));
+    expect(text).toContain("[application event: action outcome]");
+    expect(text).toContain("It ran.");
+    expect(text).toContain("m1");
+    const rejected = prefaceOf(
+      placementsOf(path, [action("rejected")], now, true),
       now,
     );
-    expect(JSON.stringify(expired.get(String(user._id)))).toContain("expired");
-  });
-
-  test("pending, running, and an answer with no member message after it say nothing", () => {
-    expect(prefaceOf([assistant, user], [action("pending")], now).size).toBe(0);
-    expect(prefaceOf([assistant, user], [action("running")], now).size).toBe(0);
-    expect(prefaceOf([assistant], [action("rejected")], now).size).toBe(0);
+    expect(JSON.stringify(rejected.get(String(leaf._id)))).toContain(
+      "rejected",
+    );
   });
 });
 

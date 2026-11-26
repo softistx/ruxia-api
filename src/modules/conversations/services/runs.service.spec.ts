@@ -236,7 +236,10 @@ describe("RunsService: the exchange", () => {
     expect(last?.system?.map((block) => block.text).join("\n")).toContain(
       "Summary of the earlier conversation:\nA SUMMARY OF IT ALL",
     );
-    expect(last?.messages).toHaveLength(6);
+    // The fold keeps six messages, the first of them an answer: a provider's
+    // history starts on a member's message, so that one is dropped.
+    expect(last?.messages).toHaveLength(5);
+    expect(last?.messages[0]?.role).toBe("user");
   });
 
   test("a persona its owner made PRIVATE cannot be written to", async () => {

@@ -180,7 +180,10 @@ export class RunStartService {
     const { conversation, user, assistant, model } = exchange;
     const adapter = adapters.adapterFor(model);
     const path = await messages.path(conversation, user._id);
-    const { facts, tools, observer } = await this.deps.memory.kit(persona);
+    const { facts, tools, observer } = await this.deps.memory.kit(
+      persona,
+      path.flatMap((doc) => doc.parts),
+    );
     const base = {
       personality: persona.personality,
       locale: this.actor.locale,
@@ -197,7 +200,7 @@ export class RunStartService {
       ),
       summarize: summarizeWith(adapter),
       expand: (lists) => attachments.expand(lists, readerOf(model)),
-      preface: await this.deps.actions.outcomes(path),
+      preface: await this.deps.actions.outcomes(path, assistant._id),
     });
     const run = runAgent({
       model: adapter,

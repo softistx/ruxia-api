@@ -5,9 +5,15 @@ import type { AppMongo } from "../../../config/db";
 import { exhausted } from "../../../shared/errors";
 import { retryWriteConflicts } from "../../../shared/retry";
 import type { Tx } from "../../../shared/tx";
-import type { AttachmentPart, AttachmentsService } from "../../attachments";
+import type { AttachmentsService } from "../../attachments";
 import { actionDocs, type Proposals } from "../conversations.actions.utils";
 import { runInProgress } from "../conversations.errors";
+import {
+  assistantMessageDoc,
+  type Exchange,
+  type Finish,
+  userMessageDoc,
+} from "../conversations.exchange.utils";
 import {
   endMessage,
   failMessage,
@@ -15,44 +21,9 @@ import {
   spendIncrement,
   takeConversation,
 } from "../conversations.writes.utils";
-import type {
-  ConversationDocument,
-  MessageDocument,
-  MessageTurn,
-  MessageUsage,
-  StoredPart,
-} from "../models";
+import type { MessageDocument } from "../models";
 
-// What a run's end writes on its assistant message.
-export interface Finish {
-  status: "done" | "stopped" | "failed";
-  parts: StoredPart[];
-  // How the parts group in the SDK's messages (a DONE answer only).
-  turns?: MessageTurn[];
-  usage: MessageUsage | null;
-  cost: number | null;
-  finishReason: string | null;
-  errorCode: string | null;
-}
-
-// What a send writes: the member's text under `parentId` (or, for a
-// regenerate, the member's message that already exists), and the reply whose id
-// is the run's.
-export type Exchange = {
-  conversation: ConversationDocument;
-  modelId: string;
-  // The run's id, made by the send before it claims the run; made here when
-  // left out.
-  assistantId?: ObjectId;
-} & (
-  | {
-      parentId: ObjectId | null;
-      text: string;
-      // The member's files, checked by `AttachmentsService.require`.
-      attachments?: readonly AttachmentPart[];
-    }
-  | { user: MessageDocument }
-);
+export type { Exchange, Finish } from "../conversations.exchange.utils";
 
 // The messages a run writes, for one request: the exchange a send inserts,
 // the end a run gives its answer, and the release of a run that cannot end.
@@ -115,8 +86,8 @@ export class RunMessagesService {
   }
 
   // Ends a streaming message, once: false when something else did first. On
-  // success the actions it proposed are stored, the conversation is released (`activeRunId` null, `lastMessageAt`
-  // moved to the end of the answer) and the message's cost and usage are added
+  // success the actions it proposed are stored, the conversation is released
+  // (`activeRunId` null, `lastMessageAt` moved to the end of the answer) and the message's cost and usage are added
   // to the spend ledger, in the same transaction.
   async finalise(
     message: Pick<MessageDocument, "_id" | "conversationId">,
@@ -214,15 +185,15 @@ export class RunMessagesService {
   ) {
     const files = input.attachments ?? [];
     const user = await tx.db.messages.create({
-      _id: new ObjectId(),
-      ownerId: this.actor,
-      conversationId,
-      parentId: input.parentId,
-      role: "user",
-      parts: [{ type: "text", text: input.text }, ...files],
-      searchText: input.text,
-      status: "done",
-      createdAt: at,
+      ...userMessageDoc({
+        id: new ObjectId(),
+        actor: this.actor,
+        conversationId,
+        parentId: input.parentId,
+        text: input.text,
+        files,
+        at,
+      }),
     });
     await this.attachments.link(tx, files, conversationId, user._id);
     return user;
@@ -239,16 +210,16 @@ export class RunMessagesService {
       "user" in input
         ? input.user
         : await this.createUser(tx, input, conversation._id, at);
-    const assistant = await tx.db.messages.create({
-      _id: assistantId,
-      ownerId: this.actor,
-      conversationId: conversation._id,
-      parentId: user._id,
-      role: "assistant",
-      modelId,
-      status: "streaming",
-      createdAt: at,
-    });
+    const assistant = await tx.db.messages.create(
+      assistantMessageDoc({
+        actor: this.actor,
+        conversationId: conversation._id,
+        assistantId,
+        parentId: user._id,
+        modelId,
+        at,
+      }),
+    );
     return { user, assistant };
   }
 }

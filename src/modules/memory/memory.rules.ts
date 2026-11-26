@@ -11,6 +11,19 @@ export const INJECT_CHARS = 4000;
 // The tools the memory gives a run; any other tool's output is outside input.
 export const MEMORY_TOOLS = ["remember", "forget"] as const;
 
+// Whether the parts of a conversation already hold output of a tool that is not
+// the memory's (a `tool-result` of another tool, or a provider's own
+// `server-tool` block): what a run would remember may come from untrusted text.
+export const taintedBy = (
+  parts: readonly { type: string; name?: string }[],
+): boolean =>
+  parts.some(
+    (part) =>
+      part.type === "server-tool" ||
+      (part.type === "tool-result" &&
+        !(MEMORY_TOOLS as readonly string[]).includes(part.name ?? "")),
+  );
+
 // The text of an item, on the field `text`: not blank, at most 500 characters.
 export function textIssues(text: string): FieldIssue[] {
   if (text.trim() === "") {

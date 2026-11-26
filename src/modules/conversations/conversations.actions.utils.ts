@@ -80,6 +80,7 @@ export const actionDocs = (
     expiresAt: new Date(part.expiresAt),
     result: null,
     decidedAt: null,
+    toldOn: null,
     createdAt: at,
     updatedAt: at,
   }));
@@ -110,34 +111,58 @@ export const refusedResult = (
   error: { code, message: code },
 });
 
-// What the decided actions of a path tell the model: for each, the SDK's
-// `actionOutcomeMessage`, whose text goes at the head of the member's message
-// that follows the answer that proposed it (a second `tool_result` for the same
-// call would be refused by a provider). Keyed by the id of that message; a
-// pending or running action says nothing yet, an expired one says so.
-export function prefaceOf(
+// Where the model is told the outcome of a decided action: at the head of the
+// member message it was first told at (`toldOn`, when that message is on the
+// path), else at the head of the current member message, the leaf, when no
+// answer has been written to it yet (`fresh`). A message that already has an
+// answer is never changed afterwards, so the prompt prefix stays stable; an
+// outcome that finds no place waits for the next send. Pending and running
+// actions say nothing yet.
+export interface Placement {
+  action: ProposedActionDocument;
+  userId: string;
+}
+
+export function placementsOf(
   path: readonly MessageDocument[],
   actions: readonly ProposedActionDocument[],
   now: Date,
+  fresh: boolean,
+): Placement[] {
+  const onPath = new Set(path.map((doc) => String(doc._id)));
+  const leaf = path.at(-1);
+  return actions.flatMap((action): Placement[] => {
+    const status = statusAt(action, now);
+    if (status === "pending" || status === "running") return [];
+    const told = action.toldOn === null ? undefined : String(action.toldOn);
+    if (told !== undefined && onPath.has(told)) {
+      return [{ action, userId: told }];
+    }
+    return leaf?.role === "user" && fresh
+      ? [{ action, userId: String(leaf._id) }]
+      : [];
+  });
+}
+
+// The SDK's `actionOutcomeMessage` text of each placed action, by the id of
+// the member message it heads (a second `tool_result` for the same call would
+// be refused by a provider).
+export function prefaceOf(
+  placements: readonly Placement[],
+  now: Date,
 ): Map<string, Part[]> {
   const preface = new Map<string, Part[]>();
-  path.forEach((doc, index) => {
-    const next = path[index + 1];
-    if (doc.role !== "assistant" || next?.role !== "user") return;
-    const outcomes = actions
-      .filter((action) => String(action.messageId) === String(doc._id))
-      .flatMap((action) => {
-        const status = statusAt(action, now);
-        if (status === "pending" || status === "running") return [];
-        const decided = {
-          ...sdkAction(action, status),
-          ...(action.result !== null && {
-            result: action.result as unknown as ToolResultPart,
-          }),
-        };
-        return actionOutcomeMessage(decided).parts;
-      });
-    if (outcomes.length > 0) preface.set(String(next._id), outcomes);
-  });
+  for (const { action, userId } of placements) {
+    const decided = {
+      ...sdkAction(action, statusAt(action, now)),
+      ...(action.result !== null && {
+        result: action.result as unknown as ToolResultPart,
+      }),
+    };
+    preface.set(userId, [
+      ...(preface.get(userId) ?? []),
+      ...actionOutcomeMessage(decided).parts,
+    ]);
+  }
   return preface;
 }

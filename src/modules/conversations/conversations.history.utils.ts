@@ -95,20 +95,25 @@ export const docIdOf = (storedId: string) => storedId.split("#")[0] ?? storedId;
 
 // The message a fold's summary is stored on: the document of the last stored
 // message it covers, when that is the document's last turn. A fold that ends
-// inside an answer's turns is stored on the document before it (the summary
-// then also tells the start of the answer, which is kept and read again), and
-// on none when there is none before.
+// inside an answer's turns is stored on none: the summary then serves this run
+// only, because a sibling branch under the document before it would read a
+// summary that covers part of an answer it does not have.
 export function summaryAnchor(
   path: readonly MessageDocument[],
   throughId: string,
 ): string | undefined {
   const id = docIdOf(throughId);
-  const at = path.findIndex((doc) => String(doc._id) === id);
-  const doc = path[at];
+  const doc = path.find((candidate) => String(candidate._id) === id);
   if (doc === undefined) return undefined;
   const turn = throughId.includes("#") ? Number(throughId.split("#")[1]) : 0;
-  const last = turnsOfDoc(doc).length - 1;
-  if (turn >= last) return id;
-  const before = path[at - 1];
-  return before === undefined ? undefined : String(before._id);
+  return turn >= turnsOfDoc(doc).length - 1 ? id : undefined;
+}
+
+// A provider's history starts on a member's turn: the assistant and tool turns
+// a fold leaves at the head of the context are dropped up to the first member
+// message (they are older than it; the summary stands for what came before).
+// Unchanged when no member message is there to start on.
+export function fromFirstMember(messages: readonly Message[]): Message[] {
+  const at = messages.findIndex((message) => message.role === "user");
+  return at === -1 ? [...messages] : messages.slice(at);
 }
