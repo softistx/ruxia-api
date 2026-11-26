@@ -4,9 +4,9 @@ import { fail, retryParams } from "../../shared/errors";
 
 // The module's refusals (CONTEXT.md lists their codes). `not-found` covers a
 // conversation that does not exist, is deleted, or is another member's: the
-// three look alike on purpose, the admin's included. `invalid-parent` is a
-// field issue on `parentId`; `run-in-progress` is the send's and `run-not-found`
-// the stop's and the run stream's.
+// three look alike on purpose, the admin's included. `invalid-parent` and
+// `invalid-emoji` are field issues (`parentId`, `emoji`); `run-in-progress` is
+// the send's and `run-not-found` the stop's and the run stream's.
 export const codes = defineCodes("conversations", [
   "not-found",
   "invalid-cursor",
@@ -16,6 +16,12 @@ export const codes = defineCodes("conversations", [
   "model-unavailable",
   "persona-unavailable",
   "too-many-messages",
+  "message-not-found",
+  "not-editable",
+  "not-regenerable",
+  "invalid-emoji",
+  "reaction-limit",
+  "restore-expired",
 ]);
 
 // An id that names no conversation of the viewer (or a malformed one).
@@ -47,6 +53,27 @@ export const modelUnavailable = () =>
 // PRIVATE by someone else): the conversation stays readable, not continuable.
 export const personaUnavailable = () =>
   fail("conversations.errors.persona-unavailable", { status: 409 });
+
+// An id that names no message of the viewer's live conversations (or a
+// malformed one): another member's, the admin's included.
+export const messageNotFound = () =>
+  fail("conversations.errors.message-not-found", { status: 404 });
+
+// Only a member's own message can be edited: not an answer.
+export const notEditable = () =>
+  fail("conversations.errors.not-editable", { status: 409 });
+
+// Only an answer can be regenerated: not a member's message.
+export const notRegenerable = () =>
+  fail("conversations.errors.not-regenerable", { status: 409 });
+
+// A message already carries the most reactions it may.
+export const reactionLimit = () =>
+  fail("conversations.errors.reaction-limit", { status: 409 });
+
+// The 30 days a deleted conversation can be restored in have passed.
+export const restoreExpired = () =>
+  fail("conversations.errors.restore-expired", { status: 409 });
 
 // Past the sends' limit: when to try again, in seconds and minutes.
 export const tooManyMessages = (retryAfter: number) => {

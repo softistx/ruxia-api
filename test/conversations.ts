@@ -20,12 +20,17 @@ export function fakeAdapters(script: Script = []): ModelAdapters & {
 import { appMongo } from "../src/config/db";
 import { type Throttle, unthrottled } from "../src/limits/throttle";
 import {
+  BranchesService,
   type ConversationsRuntime,
   ConversationsService,
+  type ExportBucket,
+  ExportsService,
   MessagesService,
   type ModelAdapters,
+  ReactionsService,
   RunMessagesService,
   RunsService,
+  SearchService,
   TitlesService,
 } from "../src/modules/conversations";
 import { ModelsService, noStatuses } from "../src/modules/models";
@@ -34,6 +39,7 @@ import { AvatarsService, PersonasService } from "../src/modules/personas";
 // conversations, messages and personas services of one viewer.
 import { type authApp, signedInAccount } from "./auth";
 import { sessionViewer } from "./execute";
+import { memoryBucket } from "./media";
 
 export const sonnet = "claude-sonnet-5-5";
 
@@ -52,6 +58,8 @@ export async function memberOf(
     titleModelId?: string;
     observers?: readonly AgentObserver[];
     warn?: (message: string) => void;
+    // The bucket the exports go to (a memory one by default).
+    media?: ExportBucket;
   } = {},
 ) {
   const account = await signedInAccount(kit, options);
@@ -112,5 +120,27 @@ export async function memberOf(
     viewer,
     deps,
     runs: new RunsService(deps, viewer),
+    search: new SearchService(appMongo, conversations, viewer),
+    branches: new BranchesService(
+      appMongo,
+      conversations,
+      messages,
+      viewer,
+      now,
+    ),
+    reactions: new ReactionsService(
+      appMongo,
+      conversations,
+      messages,
+      viewer,
+      now,
+    ),
+    exports: new ExportsService(
+      appMongo,
+      conversations,
+      messages,
+      options.media ?? memoryBucket().bucket,
+      viewer,
+    ),
   };
 }

@@ -16,11 +16,13 @@ test("a run takes a conversation only while none is active", () => {
     conversationId,
     actor: "ada",
     assistantId: messageId,
+    modelId: "claude-sonnet-5-5",
     at,
   });
   expect(filter).toMatchObject({ ownerId: "ada", activeRunId: null });
   expect(update.$set).toMatchObject({
     activeRunId: String(messageId),
+    modelId: "claude-sonnet-5-5",
     updatedBy: "ada",
   });
 });

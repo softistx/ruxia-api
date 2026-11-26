@@ -3,6 +3,7 @@ import {
   isObjectIdString,
   NotFoundError,
 } from "@softistx/mongo";
+import type { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import type {
@@ -14,18 +15,26 @@ import {
   invalidCursor,
   modelUnavailable,
   notFound,
+  restoreExpired,
+  runInProgress,
 } from "../conversations.errors";
 import type {
   ConversationModels,
   ConversationPersonas,
 } from "../conversations.integrity";
+import { isRestorable } from "../conversations.rules";
 import { isPersonaMissing } from "../conversations.utils";
+import { deleteConversationWrite } from "../conversations.writes.utils";
 import type { ConversationDocument } from "../models";
 
 type Page = {
   first?: number | null | undefined;
   after?: string | null | undefined;
   filter?: ConversationFilter | null | undefined;
+  // What a search matched (its ids) and the words it was made of, for the
+  // cursor: the search service gives them, a plain list leaves them out.
+  only?: readonly ObjectId[];
+  searched?: string;
 };
 
 // The conversations, for one request: the resolver ran the guard first (a
@@ -86,6 +95,7 @@ export class ConversationsService {
       ownerId: this.actor,
       activeLeafId: { $ne: null },
       ...(personaId !== undefined && { personaId }),
+      ...(args.only !== undefined && { _id: { $in: [...args.only] } }),
     };
     try {
       const [page, total] = await Promise.all([
@@ -98,6 +108,7 @@ export class ConversationsService {
           scope: cursorScopeOf("conversations", [
             this.actor,
             personaId ?? null,
+            ...(args.searched === undefined ? [] : [args.searched]),
           ]),
         }),
         this.conversations.count(filter),
@@ -107,6 +118,32 @@ export class ConversationsService {
       if (error instanceof InvalidCursorError) throw invalidCursor();
       throw error;
     }
+  }
+
+  // Soft-deletes the conversation, refused while an answer is being written
+  // (stop it first). Restorable for 30 days.
+  async delete(id: string) {
+    const conversation = await this.find(id);
+    const { filter, update } = deleteConversationWrite({
+      conversationId: conversation._id,
+      actor: this.actor,
+      at: this.now(),
+    });
+    const done = await this.conversations.raw.updateOne(filter, update);
+    if (done.matchedCount === 0) throw runInProgress();
+    return this.conversations.getById(conversation._id, { withDeleted: true });
+  }
+
+  // Brings a deleted conversation back, within 30 days of its deletion; a
+  // live one is returned as it is.
+  async restore(id: string) {
+    const found = isObjectIdString(id)
+      ? await this.conversations.findById(id, { withDeleted: true })
+      : undefined;
+    if (!found || found.ownerId !== this.actor) throw notFound();
+    if (found.deletedAt === null) return found;
+    if (!isRestorable(found.deletedAt, this.now())) throw restoreExpired();
+    return this.conversations.restore(found._id);
   }
 
   // The model the next message goes to: enabled, as at the start.

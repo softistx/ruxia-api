@@ -145,6 +145,8 @@ type Conversation {
   activeRunId: ID
   """When it was created."""
   createdAt: DateTime!
+  """When it was deleted (restorable for 30 days); null while it is live."""
+  deletedAt: DateTime
   """The conversation's id."""
   id: ID!
   """When the last message was written."""
@@ -201,6 +203,13 @@ type ConversationEdge {
 input ConversationFilter {
   """Only the conversations held with this persona."""
   personaId: ID @constraint(maxLength: 64)
+  """
+  Only the conversations whose title or messages contain every word, in the same title or message (full-text,
+  case and accents ignored, whole words). Operators are never interpreted; the
+  text is cut at 100 characters and 8 words; nothing searchable left means no
+  narrowing.
+  """
+  search: String @constraint(maxLength: 500)
 }
 
 """An ISO 3166-1 alpha-2 country code, such as FR."""
@@ -311,6 +320,14 @@ enum ErrorParamKind {
   SELECT
   """`{name}`: inserted as it is."""
   TEXT
+}
+
+"""How an export is written."""
+enum ExportFormat {
+  """The whole tree, every branch, as JSON."""
+  JSON
+  """The branch shown, as Markdown."""
+  MARKDOWN
 }
 
 """A GUID: 8-4-4-4-12 hexadecimal digits, with no version check."""
@@ -549,10 +566,16 @@ type Message {
   parentId: ID
   """Its parts, in order."""
   parts: [MessagePart!]!
+  """Whether the member pinned it."""
+  pinned: Boolean!
+  """The emojis the member reacted with, in order."""
+  reactions: [String!]!
   """Who wrote it."""
   role: MessageRole!
   """The id of its run, set only while it is STREAMING."""
   runId: ID
+  """Where it stands among the messages that follow the same parent."""
+  siblings: Siblings!
   """Where it stands."""
   status: MessageStatus!
   """Its text parts, joined."""
@@ -743,6 +766,16 @@ type Mutation {
     input: CreatePersonaInput!
   ): Persona!
   """
+  Soft-deletes one of the member's conversations; it can be restored for 30
+  days, then it is purged with its messages and exports. 404
+  `conversations.errors.not-found`; 409 `conversations.errors.run-in-progress`
+  while an answer is being written (stop it first).
+  """
+  deleteConversation(
+    """The conversation's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Conversation!
+  """
   Deletes the member's own persona (and unfeatures it): it leaves every list, and the conversations
   held with it stay readable. Answers its id. 404 `personas.errors.not-found`,
   403 `personas.errors.not-owner` as for an update.
@@ -781,6 +814,19 @@ type Mutation {
     """The persona's id."""
     id: ID! @constraint(maxLength: 64)
   ): Persona!
+  """
+  Edits a message of the member's: writes a sibling message (same parent, so
+  a new branch) with `text` and starts the reply, as `sendMessage` does (the
+  same limits and checks; the branch shown becomes the new one). 404
+  `conversations.errors.message-not-found`; 409
+  `conversations.errors.not-editable` for an answer, plus `sendMessage`'s.
+  """
+  editMessage(
+    """The message to edit."""
+    messageId: ID! @constraint(maxLength: 64)
+    """What the member says now."""
+    text: String! @constraint(minLength: 1, maxLength: 20000)
+  ): SendMessagePayload!
   """Enables a disabled member again. Administrators only."""
   enableMember(
     """The member's id."""
@@ -793,6 +839,20 @@ type Mutation {
   `auth.errors.second-factor-state` when a factor is already active.
   """
   enrollSecondFactor: SecondFactorEnrolment!
+  """
+  Stores the conversation as a file and returns its media key: the branch shown
+  for MARKDOWN, the whole tree for JSON. Download it at
+  `/media/conversation-exports/<key>` (the owner alone; a new export of the
+  same conversation and format replaces the previous file). 404
+  `conversations.errors.not-found`; 503 `auth.errors.unavailable` when the
+  file cannot be stored.
+  """
+  exportConversation(
+    """The format."""
+    format: ExportFormat!
+    """The conversation's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): String!
   """
   Invites an address with a role and mails it the link. Administrators only.
   409 `invitations.errors.already-member` for an address that has an account,
@@ -813,6 +873,30 @@ type Mutation {
   """
   passkeySignInOptions: PasskeyChallenge!
   """
+  Pins or unpins a message (idempotent). 404
+  `conversations.errors.message-not-found`.
+  """
+  pinMessage(
+    """The message's id."""
+    messageId: ID! @constraint(maxLength: 64)
+    """Whether it is pinned."""
+    pinned: Boolean!
+  ): Message!
+  """
+  Toggles the member's reaction: added when absent, taken back when present.
+  `emoji` is one emoji (a single character as the keyboard gives it, at most
+  32 units). 404 `conversations.errors.message-not-found`; 400
+  `validation.errors.invalid-input` with `emoji` invalid
+  (`conversations.errors.invalid-emoji`); 409
+  `conversations.errors.reaction-limit` past 20 reactions on a message.
+  """
+  react(
+    """The emoji."""
+    emoji: String! @constraint(minLength: 1, maxLength: 32)
+    """The message's id."""
+    messageId: ID! @constraint(maxLength: 64)
+  ): Message!
+  """
   A recovery code instead of the app's, for a lost phone; each works once. The
   account is mailed a notice. Refused as confirmSecondFactor.
   """
@@ -822,6 +906,20 @@ type Mutation {
     """One unused recovery code, at most 40 characters."""
     recoveryCode: String! @constraint(maxLength: 40)
   ): SignInPayload!
+  """
+  Writes a new reply to the same member's message, as a new run and a new
+  branch. `modelId` becomes the conversation's model. 404
+  `conversations.errors.message-not-found`; 409
+  `conversations.errors.not-regenerable` for a member's message,
+  `conversations.errors.model-unavailable` (field `modelId`), plus
+  `sendMessage`'s.
+  """
+  regenerate(
+    """The answer to answer again."""
+    messageId: ID! @constraint(maxLength: 64)
+    """The model to answer with; the conversation's when left out."""
+    modelId: String @constraint(minLength: 1, maxLength: 200)
+  ): SendMessagePayload!
   """
   Replaces all the recovery codes with ten new ones, on a current code of the
   app: the old ones stop working. Needs a session confirmed within 10 minutes
@@ -910,6 +1008,15 @@ type Mutation {
     token: String! @constraint(maxLength: 200)
   ): Boolean!
   """
+  Brings back a conversation deleted less than 30 days ago (a live one is
+  returned as it is). 404 `conversations.errors.not-found`; 409
+  `conversations.errors.restore-expired`.
+  """
+  restoreConversation(
+    """The conversation's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Conversation!
+  """
   Cancels a pending invitation. Administrators only. 404 `invitations.errors.not-found`, 409 `invitations.errors.not-pending`.
   """
   revokeInvitation(
@@ -930,6 +1037,18 @@ type Mutation {
     """The conversation, its parent message and the text."""
     input: SendMessageInput!
   ): SendMessagePayload!
+  """
+  Shows the branch through a message: `Conversation.activeLeafId` moves to the
+  deepest leaf below it, following the latest child at each step. 404
+  `conversations.errors.not-found` or `conversations.errors.message-not-found`;
+  409 `conversations.errors.run-in-progress` while an answer is being written.
+  """
+  setActiveBranch(
+    """The conversation's id."""
+    conversationId: ID! @constraint(maxLength: 64)
+    """A message of the branch to show."""
+    messageId: ID! @constraint(maxLength: 64)
+  ): Conversation!
   """
   Changes the model of one of the member's conversations. 404
   `conversations.errors.not-found`, 409 `conversations.errors.model-unavailable`
@@ -1393,6 +1512,14 @@ type Query {
   """
   ping: String!
   """
+  The pinned messages of one of the member's conversations, oldest first (at
+  most 100). 404 `conversations.errors.not-found`.
+  """
+  pinnedMessages(
+    """The conversation's id."""
+    conversationId: ID! @constraint(maxLength: 64)
+  ): [Message!]!
+  """
   The signed-in account, or null for an anonymous request. Refuses nothing.
   """
   viewer: Viewer
@@ -1489,6 +1616,17 @@ type SendMessagePayload {
   runId: ID!
   """The member's message, written."""
   userMessage: Message!
+}
+
+"""
+The messages that follow the same parent (edits of a message, regenerated
+answers), oldest first.
+"""
+type Siblings {
+  """Their ids, in creation order, this message's included."""
+  ids: [ID!]!
+  """This message's place in `ids`, from 0."""
+  index: Int!
 }
 
 """The credentials of a password sign-in."""

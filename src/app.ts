@@ -19,6 +19,8 @@ import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
 import {
+  ExportFiles,
+  exportRoutes,
   type ModelAdapters,
   type RunOptions,
   runEvents,
@@ -124,6 +126,7 @@ export function createApp(
       titleModelId,
       runtime,
       observers,
+      media,
       now,
     });
   return (
@@ -143,6 +146,8 @@ export function createApp(
           media,
         ),
       )
+      // The exports of conversations, on the same bucket: read by their owner.
+      .plugin(exportRoutes({ exports: new ExportFiles(appMongo) }, media))
       // A body past 100 KiB is refused (413) before it is read, for /graphql
       // below: a query is a few kilobytes (alxia's production guide, "Cap the body").
       .bodyLimit(BODY_LIMIT)

@@ -53,4 +53,33 @@ extend type Mutation {
     "The run's id (the reply message's id)."
     runId: ID! @constraint(maxLength: 64)
   ): Message!
+
+  """
+  Edits a message of the member's: writes a sibling message (same parent, so
+  a new branch) with `text` and starts the reply, as `sendMessage` does (the
+  same limits and checks; the branch shown becomes the new one). 404
+  `conversations.errors.message-not-found`; 409
+  `conversations.errors.not-editable` for an answer, plus `sendMessage`'s.
+  """
+  editMessage(
+    "The message to edit."
+    messageId: ID! @constraint(maxLength: 64)
+    "What the member says now."
+    text: String! @constraint(minLength: 1, maxLength: 20000)
+  ): SendMessagePayload!
+
+  """
+  Writes a new reply to the same member's message, as a new run and a new
+  branch. `modelId` becomes the conversation's model. 404
+  `conversations.errors.message-not-found`; 409
+  `conversations.errors.not-regenerable` for a member's message,
+  `conversations.errors.model-unavailable` (field `modelId`), plus
+  `sendMessage`'s.
+  """
+  regenerate(
+    "The answer to answer again."
+    messageId: ID! @constraint(maxLength: 64)
+    "The model to answer with; the conversation's when left out."
+    modelId: String @constraint(minLength: 1, maxLength: 200)
+  ): SendMessagePayload!
 }

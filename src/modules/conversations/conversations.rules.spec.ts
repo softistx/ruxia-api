@@ -7,9 +7,12 @@ import type {
 } from "@softistx/ai-core";
 import {
   compactionBudget,
+  emojiIssues,
   finishOf,
+  isRestorable,
   languageName,
   parentIssues,
+  RESTORE_WINDOW_MS,
   statusOf,
   systemOf,
 } from "./conversations.rules";
@@ -208,5 +211,30 @@ describe("finishOf", () => {
         "INTERRUPTED",
       ),
     ).toMatchObject({ status: "failed", errorCode: "MODEL_ERROR" });
+  });
+});
+
+describe("emojiIssues", () => {
+  test("accepts one emoji, a flag, a keycap or a sequence", () => {
+    for (const emoji of ["👍", "❤️", "🇫🇷", "1️⃣", "👨‍👩‍👧", "🎉"]) {
+      expect(emojiIssues(emoji)).toEqual([]);
+    }
+  });
+
+  test("refuses text, several emojis, nothing and a long string", () => {
+    for (const emoji of ["a", "hi", "👍👍", "", " ", "👍x", "👍".repeat(20)]) {
+      expect(emojiIssues(emoji)).toEqual([
+        { path: "emoji", code: "conversations.errors.invalid-emoji" },
+      ]);
+    }
+  });
+});
+
+describe("isRestorable", () => {
+  test("holds for 30 days after the deletion", () => {
+    const deleted = new Date("2030-01-01T00:00:00Z");
+    const at = (ms: number) => new Date(deleted.getTime() + ms);
+    expect(isRestorable(deleted, at(RESTORE_WINDOW_MS))).toBe(true);
+    expect(isRestorable(deleted, at(RESTORE_WINDOW_MS + 1))).toBe(false);
   });
 });

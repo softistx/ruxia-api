@@ -2,6 +2,8 @@ export * from "./conversations.adapters";
 export * from "./conversations.errors";
 export * from "./conversations.events";
 export * from "./conversations.integrity";
+export * from "./conversations.media";
+export * from "./conversations.purge";
 export * from "./conversations.recorder";
 export * from "./conversations.registry";
 export * from "./conversations.rules";

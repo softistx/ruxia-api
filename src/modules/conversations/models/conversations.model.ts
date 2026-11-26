@@ -51,6 +51,16 @@ export const conversations = defineCollection({
       name: "conversations_owner_persona",
     },
     {
+      key: { ownerId: 1, title: "text" },
+      name: "conversations_search",
+      default_language: "none",
+    },
+    {
+      key: { deletedAt: 1 },
+      name: "conversations_deleted",
+      partialFilterExpression: { deletedAt: { $type: "date" } },
+    },
+    {
       key: { activeRunId: 1 },
       name: "conversations_running",
       partialFilterExpression: { activeRunId: { $type: "string" } },

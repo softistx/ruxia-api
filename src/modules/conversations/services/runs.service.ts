@@ -16,6 +16,9 @@ import { unavailable } from "../../../shared/errors";
 import type { ModelAdapters } from "../conversations.adapters";
 import {
   limitedSend,
+  modelUnavailable,
+  notEditable,
+  notRegenerable,
   personaUnavailable,
   runInProgress,
   runNotFound,
@@ -41,7 +44,10 @@ import type { TitlesService } from "./titles.service";
 // What the runs need, every one passed by the registry (never defaulted).
 export interface RunsDeps {
   conversations: Pick<ConversationsService, "find">;
-  messages: Pick<MessagesService, "requireParent" | "path" | "context">;
+  messages: Pick<
+    MessagesService,
+    "requireParent" | "path" | "context" | "find"
+  >;
   runMessages: Pick<
     RunMessagesService,
     "insertExchange" | "finalise" | "ofRun" | "release"
@@ -84,18 +90,75 @@ export class RunsService {
   }
 
   // Writes the member's message and the empty reply, and starts the run that
-  // fills it. The run goes on whether or not the client stays.
-  async send(input: SendMessageInput) {
-    const { conversations, messages, runMessages, models } = this.deps;
-    await limitedSend(this.deps.sends(this.actor.id));
-    const conversation = await conversations.find(input.conversationId);
-    await this.requireIdle(conversation);
+  // fills it. The run goes on whether or not the client stays. `parent` names
+  // the message it follows (a null `id` for the first message of a conversation
+  // that already has others, an edit's); left out, it is `input.parentId` or the
+  // end of the branch shown.
+  async send(input: SendMessageInput, parent?: { id: ObjectId | null }) {
+    const conversation = await this.admit(input.conversationId);
     const leaf = conversation.activeLeafId;
-    const parent = await messages.requireParent(
-      conversation,
-      input.parentId ?? (leaf === null ? null : String(leaf)),
+    const parentId =
+      parent === undefined
+        ? ((
+            await this.deps.messages.requireParent(
+              conversation,
+              input.parentId ?? (leaf === null ? null : String(leaf)),
+            )
+          )?._id ?? null)
+        : parent.id;
+    return this.exchange(conversation, { parentId, text: input.text });
+  }
+
+  // Edits a message of the member's: a sibling message under the same parent
+  // and a new reply, through the send (so its limit, its checks and its claim).
+  async edit(messageId: string, text: string) {
+    const message = await this.deps.messages.find(messageId);
+    if (message.role !== "user") throw notEditable();
+    return this.send(
+      { conversationId: String(message.conversationId), text },
+      { id: message.parentId },
     );
-    const model = await models.requireAvailable(conversation.modelId);
+  }
+
+  // A new reply under the same member's message, as a new run; `modelId`, when
+  // given, becomes the conversation's model.
+  async regenerate(messageId: string, modelId?: string | null) {
+    const { messages, models } = this.deps;
+    const message = await messages.find(messageId);
+    if (message.role !== "assistant" || message.parentId === null) {
+      throw notRegenerable();
+    }
+    const asked =
+      modelId === null || modelId === undefined ? undefined : modelId;
+    if (asked !== undefined && !(await models.enabled(asked))) {
+      throw modelUnavailable();
+    }
+    const user = await messages.find(String(message.parentId));
+    const conversation = await this.admit(String(message.conversationId));
+    return this.exchange(conversation, { user }, asked);
+  }
+
+  // The send's first checks: its limit, the member's conversation, no answer
+  // being written.
+  private async admit(conversationId: string) {
+    await limitedSend(this.deps.sends(this.actor.id));
+    const conversation = await this.deps.conversations.find(conversationId);
+    await this.requireIdle(conversation);
+    return conversation;
+  }
+
+  // The model and the persona checked, the run claimed, the messages written
+  // and the run launched.
+  private async exchange(
+    conversation: ConversationDocument,
+    write:
+      | { parentId: ObjectId | null; text: string }
+      | { user: MessageDocument },
+    modelOverride?: string,
+  ) {
+    const { conversations, runMessages, models } = this.deps;
+    const modelId = modelOverride ?? conversation.modelId;
+    const model = await models.requireAvailable(modelId);
     const persona = await this.persona(conversation);
     // The run is claimed before the exchange is written: from the insert on
     // another send that reads this `activeRunId` must find it held, not stale.
@@ -105,33 +168,39 @@ export class RunsService {
     try {
       const { user, assistant } = await runMessages.insertExchange({
         conversation,
-        parentId: parent?._id ?? null,
-        text: input.text,
-        modelId: conversation.modelId,
+        modelId,
         assistantId,
+        ...write,
       });
       const exchange = {
         conversation,
         user,
         assistant,
         model,
-        first: parent === null && conversation.title === null,
+        first:
+          "text" in write &&
+          conversation.activeLeafId === null &&
+          conversation.title === null,
       };
-      try {
-        await this.launch(exchange, persona.personality);
-      } catch (error) {
-        // Nothing is running: the reply ends FAILED rather than STREAMING for
-        // ever, with the conversation released.
-        await this.end(exchange, undefined, [], undefined, error);
-      }
+      await this.launchOrFail(exchange, persona.personality);
       return {
         runId,
         userMessage: user,
         reply: (await runMessages.ofRun(runId)) ?? assistant,
-        conversation: await conversations.find(input.conversationId),
+        conversation: await conversations.find(String(conversation._id)),
       };
     } finally {
       this.deps.runtime.unclaim(runId);
+    }
+  }
+
+  // Launches the run; when that throws nothing is running, so the reply ends
+  // FAILED rather than STREAMING for ever, with the conversation released.
+  private async launchOrFail(exchange: Exchange, personality: string) {
+    try {
+      await this.launch(exchange, personality);
+    } catch (error) {
+      await this.end(exchange, undefined, [], undefined, error);
     }
   }
 

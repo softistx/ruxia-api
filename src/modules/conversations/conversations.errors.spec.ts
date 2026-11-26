@@ -4,9 +4,14 @@ import {
   codes,
   invalidCursor,
   limitedSend,
+  messageNotFound,
   modelUnavailable,
+  notEditable,
   notFound,
+  notRegenerable,
   personaUnavailable,
+  reactionLimit,
+  restoreExpired,
   runInProgress,
   runNotFound,
   tooManyMessages,
@@ -24,6 +29,11 @@ describe("conversations errors", () => {
       [runNotFound(), "run-not-found", 404],
       [modelUnavailable(), "model-unavailable", 409],
       [personaUnavailable(), "persona-unavailable", 409],
+      [messageNotFound(), "message-not-found", 404],
+      [notEditable(), "not-editable", 409],
+      [notRegenerable(), "not-regenerable", 409],
+      [reactionLimit(), "reaction-limit", 409],
+      [restoreExpired(), "restore-expired", 409],
     ] as const;
     for (const [error, slug, code] of cases) {
       expect(error.extensions["code"]).toBe(`conversations.errors.${slug}`);
@@ -60,8 +70,8 @@ describe("conversations errors", () => {
     await expect(broken).rejects.toThrow("boom");
   });
 
-  test("the inventory names all eight", () => {
-    expect(codes).toHaveLength(8);
+  test("the inventory names all fourteen", () => {
+    expect(codes).toHaveLength(14);
     expect(codes).toContain("conversations.errors.invalid-parent");
   });
 });

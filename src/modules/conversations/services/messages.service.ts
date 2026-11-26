@@ -1,12 +1,14 @@
 import { estimateTokens, type Message } from "@softistx/ai-core";
 import { compact } from "@softistx/ai-memory";
 import { isObjectIdString } from "@softistx/mongo";
-import type { ObjectId } from "mongodb";
+import DataLoader from "dataloader";
+import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import { invalidInput } from "../../../shared/errors";
 import { toConnection } from "../../../shared/pagination";
-import { invalidCursor } from "../conversations.errors";
+import { siblingsOf } from "../conversations.branches.utils";
+import { invalidCursor, messageNotFound } from "../conversations.errors";
 import { compactionBudget, parentIssues } from "../conversations.rules";
 import { contextOf, pageOfPath, toStored } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
@@ -25,6 +27,23 @@ export class MessagesService {
     if (!this.viewer) throw new Error("messages: an operation needs a viewer");
     return this.viewer.id;
   }
+
+  // The places of a conversation's messages, one read for all the messages
+  // of a page that ask for their siblings in the same tick.
+  private readonly places = new DataLoader(
+    async (conversationIds: readonly string[]) =>
+      Promise.all(
+        conversationIds.map((id) =>
+          this.messages.raw
+            .find(
+              { conversationId: new ObjectId(id), ownerId: this.actor },
+              { projection: { _id: 1, parentId: 1, createdAt: 1 } },
+            )
+            .toArray(),
+        ),
+      ),
+    { cache: false },
+  );
 
   private get messages() {
     return this.mongo.as(this.actor).db.messages;
@@ -130,5 +149,49 @@ export class MessagesService {
       summary: result.summary ?? summary?.text ?? null,
       messages: result.messages.map((stored) => stored.message),
     };
+  }
+
+  // One of the viewer's messages, in a conversation that is still theirs and
+  // not deleted; anything else is `message-not-found`.
+  async find(id: string): Promise<MessageDocument> {
+    const found = isObjectIdString(id)
+      ? await this.messages.findFirst({ _id: id, ownerId: this.actor })
+      : undefined;
+    const live =
+      found !== undefined &&
+      (await this.mongo.as(this.actor).db.conversations.exists({
+        _id: found.conversationId,
+        ownerId: this.actor,
+      }));
+    if (found === undefined || !live) throw messageNotFound();
+    return found;
+  }
+
+  // Every message of the conversation, the whole tree, in creation order.
+  tree(conversation: Pick<ConversationDocument, "_id">) {
+    return this.messages.findMany({
+      filter: { conversationId: conversation._id, ownerId: this.actor },
+      sort: { createdAt: 1, _id: 1 },
+    });
+  }
+
+  // The messages that share this one's parent, in creation order, with this
+  // one's place among them.
+  async siblings(message: MessageDocument) {
+    const nodes = await this.places.load(String(message.conversationId));
+    return siblingsOf(nodes, message);
+  }
+
+  // The pinned messages of a conversation, in creation order.
+  pinned(conversation: Pick<ConversationDocument, "_id">) {
+    return this.messages.findMany({
+      filter: {
+        conversationId: conversation._id,
+        ownerId: this.actor,
+        pinned: true,
+      },
+      sort: { createdAt: 1, _id: 1 },
+      limit: 100,
+    });
   }
 }

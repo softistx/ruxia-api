@@ -1,4 +1,5 @@
 import type { ObjectId } from "mongodb";
+import { joinedText } from "./conversations.utils";
 import type { Finish } from "./services/run-messages.service";
 
 // The conditional updates of a run's messages, as `{ filter, update }` pairs.
@@ -16,6 +17,8 @@ export const takeConversation = (input: {
   conversationId: ObjectId;
   actor: string;
   assistantId: ObjectId;
+  // The model the reply goes to (a regenerate may change the conversation's).
+  modelId: string;
   at: Date;
 }) => ({
   filter: {
@@ -28,6 +31,7 @@ export const takeConversation = (input: {
     $set: {
       activeRunId: String(input.assistantId),
       activeLeafId: input.assistantId,
+      modelId: input.modelId,
       lastMessageAt: input.at,
       ...stamp(input.actor, input.at),
     },
@@ -48,7 +52,14 @@ export const endMessage = (
     ownerId: actor,
     status: "streaming" as const,
   },
-  update: { $set: { ...end, ...stamp(actor, at) }, ...bump },
+  update: {
+    $set: {
+      ...end,
+      searchText: joinedText(end.parts),
+      ...stamp(actor, at),
+    },
+    ...bump,
+  },
 });
 
 // The conversation freed, only while this run holds it; the end of an answer
@@ -85,6 +96,85 @@ export const failMessage = (
   filter: { _id: messageId, ownerId: actor, status: "streaming" as const },
   update: {
     $set: { status: "failed" as const, errorCode: code, ...stamp(actor, at) },
+    ...bump,
+  },
+});
+
+// The conversation soft-deleted, only while no run is active.
+export const deleteConversationWrite = (input: {
+  conversationId: ObjectId;
+  actor: string;
+  at: Date;
+}) => ({
+  filter: {
+    _id: input.conversationId,
+    ownerId: input.actor,
+    deletedAt: null,
+    activeRunId: null,
+  },
+  update: {
+    $set: { deletedAt: input.at, ...stamp(input.actor, input.at) },
+    ...bump,
+  },
+});
+
+// The branch shown moved to `leafId`, only while no run is active.
+export const setLeafWrite = (input: {
+  conversationId: ObjectId;
+  leafId: ObjectId;
+  actor: string;
+  at: Date;
+}) => ({
+  filter: {
+    _id: input.conversationId,
+    ownerId: input.actor,
+    deletedAt: null,
+    activeRunId: null,
+  },
+  update: {
+    $set: { activeLeafId: input.leafId, ...stamp(input.actor, input.at) },
+    ...bump,
+  },
+});
+
+// A reaction taken back, only while the message carries it.
+export const pullReactionWrite = (input: {
+  messageId: ObjectId;
+  actor: string;
+  emoji: string;
+  at: Date;
+}) => ({
+  filter: {
+    _id: input.messageId,
+    ownerId: input.actor,
+    reactions: { $elemMatch: { userId: input.actor, emoji: input.emoji } },
+  },
+  update: {
+    $pull: { reactions: { userId: input.actor, emoji: input.emoji } },
+    $set: stamp(input.actor, input.at),
+    ...bump,
+  },
+});
+
+// A reaction added, only while the message lacks it and has room for it.
+export const pushReactionWrite = (input: {
+  messageId: ObjectId;
+  actor: string;
+  emoji: string;
+  limit: number;
+  at: Date;
+}) => ({
+  filter: {
+    _id: input.messageId,
+    ownerId: input.actor,
+    reactions: {
+      $not: { $elemMatch: { userId: input.actor, emoji: input.emoji } },
+    },
+    [`reactions.${input.limit - 1}`]: { $exists: false },
+  },
+  update: {
+    $push: { reactions: { userId: input.actor, emoji: input.emoji } },
+    $set: stamp(input.actor, input.at),
     ...bump,
   },
 });
