@@ -46,6 +46,8 @@ type Conversation {
   ): MessageConnection!
   "When it was deleted (restorable for 30 days); null while it is live."
   deletedAt: DateTime
+  "When it will be purged for good (30 days after it was deleted); null while it is live."
+  purgeAt: DateTime
   "When it was created."
   createdAt: DateTime!
   "When it last changed."
@@ -81,6 +83,12 @@ input ConversationFilter {
   narrowing.
   """
   search: String @constraint(maxLength: 500)
+  """
+  True lists the trash instead: the member's conversations deleted less than
+  30 days ago (restorable), the latest deletion first. A search does not apply
+  to it. False or left out lists the live ones.
+  """
+  deleted: Boolean
 }
 
 "How an export is written."

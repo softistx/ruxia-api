@@ -31,6 +31,8 @@ export const conversations = defineCollection({
     modelId: z.string().min(1).max(200),
     title: z.string().max(120).nullable().default(null),
     pinned: z.boolean().default(false),
+    // Set by the purge when it takes the conversation: a restore then misses.
+    purgingAt: z.date().nullable().default(null),
     archivedAt: z.date().nullable().default(null),
     lastMessageAt: z.date(),
     activeLeafId: objectId().nullable().default(null),

@@ -28,26 +28,37 @@ export class MessagesService {
     return this.viewer.id;
   }
 
-  // The places of a conversation's messages, one read for all the messages
-  // of a page that ask for their siblings in the same tick.
-  private readonly places = new DataLoader(
-    async (conversationIds: readonly string[]) =>
-      Promise.all(
-        conversationIds.map((id) =>
-          this.messages.raw
-            .find(
-              { conversationId: new ObjectId(id), ownerId: this.actor },
-              { projection: { _id: 1, parentId: 1, createdAt: 1 } },
-            )
-            .toArray(),
-        ),
-      ),
-    { cache: false },
-  );
-
   private get messages() {
     return this.mongo.as(this.actor).db.messages;
   }
+
+  // The places of the messages of the conversations asked in one tick: one
+  // read for all of them, whatever the number of messages of a page.
+  private readonly places = new DataLoader(
+    async (conversationIds: readonly string[]) => {
+      const wanted = [...new Set(conversationIds)];
+      const found = await this.messages.raw
+        .find(
+          {
+            conversationId: { $in: wanted.map((id) => new ObjectId(id)) },
+            ownerId: this.actor,
+          },
+          {
+            projection: {
+              _id: 1,
+              parentId: 1,
+              createdAt: 1,
+              conversationId: 1,
+            },
+          },
+        )
+        .toArray();
+      return conversationIds.map((id) =>
+        found.filter((node) => String(node.conversationId) === id),
+      );
+    },
+    { cache: false },
+  );
 
   // The branch from the first message to `leafId`, in order: one
   // `$graphLookup` up the parents, held to this conversation and owner.

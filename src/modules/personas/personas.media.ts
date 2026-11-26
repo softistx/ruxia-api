@@ -1,8 +1,7 @@
 import {
   defineMediaKind,
-  type MediaBucket,
   type MediaKey,
-  mediaRoutes,
+  type MediaUploaded,
 } from "@softistx/alxia-media";
 import { withImageRendition } from "@softistx/alxia-media/image";
 import type { Viewer } from "../../auth/viewer";
@@ -69,28 +68,26 @@ export function avatarKind(ports: PersonaAvatarPorts) {
   });
 }
 
-// The `/media` routes of the personas' files over the private bucket: the
-// kind above, and each upload remembered as its uploader's (`AvatarsService`),
-// so a persona write can link the key and nobody else can before it does.
-export function avatarRoutes(
-  ports: PersonaAvatarPorts & {
-    avatars: Pick<AvatarsService, "mayRead" | "count" | "record">;
-  },
-  bucket: MediaBucket,
+// What an avatar upload does once stored: remembers it as its uploader's
+// (`AvatarsService`), so a persona write can link the key and nobody else can
+// before it does. A throw makes the routes remove what they just stored, so
+// no file is left that nobody can claim. For the one `/media` mount
+// (src/modules/media.ts), which calls it for this kind's uploads only.
+export function avatarUploaded(
+  ports: Pick<AvatarsService, "record">,
+  upload: MediaUploaded,
+  { viewer }: MediaViewer,
 ) {
-  return mediaRoutes([avatarKind(ports)], {
-    bucket,
-    uploaded: async ({ key, contentType, size }, { viewer }) => {
-      // A throw here makes the routes remove what they just stored, so no
-      // file is left that nobody can claim.
-      if (viewer === null) throw new Error("an upload needs a viewer");
-      try {
-        await ports.avatars.record(viewer.id, key);
-      } catch (error) {
-        console.warn("persona avatar not recorded, its file is removed");
-        throw error;
-      }
-      return { key, contentType, size };
+  if (viewer === null) throw new Error("an upload needs a viewer");
+  return ports.record(viewer.id, upload.key).then(
+    () => ({
+      key: upload.key,
+      contentType: upload.contentType,
+      size: upload.size,
+    }),
+    (error: unknown) => {
+      console.warn("persona avatar not recorded, its file is removed");
+      throw error;
     },
-  });
+  );
 }

@@ -12,11 +12,12 @@ import type { ConversationsRuntime } from "./conversations.runtime";
 import { BranchesService } from "./services/branches.service";
 import { ConversationsService } from "./services/conversations.service";
 import { type ExportBucket, ExportsService } from "./services/exports.service";
+import { IdleService } from "./services/idle.service";
 import { MessagesService } from "./services/messages.service";
 import { ReactionsService } from "./services/reactions.service";
 import { RunMessagesService } from "./services/run-messages.service";
 import { RunsService } from "./services/runs.service";
-import { SearchService } from "./services/search.service";
+import { SEARCH_CAP, SearchService } from "./services/search.service";
 import { TitlesService } from "./services/titles.service";
 
 // The conversations' services for one request, wired to each other and to the
@@ -34,19 +35,22 @@ export function conversationsServices(deps: {
   sends: Throttle["sends"];
   // The private bucket the exports are stored in.
   media: ExportBucket;
+  exports: Throttle["exports"];
   warn: (name: string, message: string) => void;
   now: () => Date;
 }) {
   const { mongo, viewer, models, personas, now } = deps;
+  const messages = new MessagesService(mongo, viewer, now);
+  const runMessages = new RunMessagesService(mongo, viewer, now);
+  const idle = new IdleService(deps.runtime, runMessages);
   const conversations = new ConversationsService(
     mongo,
     models,
     personas,
     viewer,
     now,
+    idle,
   );
-  const messages = new MessagesService(mongo, viewer, now);
-  const runMessages = new RunMessagesService(mongo, viewer, now);
   const titles = new TitlesService(
     mongo,
     models,
@@ -65,6 +69,7 @@ export function conversationsServices(deps: {
       personas,
       adapters: deps.adapters,
       runtime: deps.runtime,
+      idle,
       observers: deps.observers,
       background: deps.background,
       sends: deps.sends,
@@ -79,8 +84,15 @@ export function conversationsServices(deps: {
     runMessages,
     titles,
     runs,
-    search: new SearchService(mongo, conversations, viewer),
-    branches: new BranchesService(mongo, conversations, messages, viewer, now),
+    search: new SearchService(mongo, conversations, viewer, SEARCH_CAP),
+    branches: new BranchesService(
+      mongo,
+      conversations,
+      messages,
+      viewer,
+      now,
+      idle,
+    ),
     reactions: new ReactionsService(
       mongo,
       conversations,
@@ -93,7 +105,10 @@ export function conversationsServices(deps: {
       conversations,
       messages,
       deps.media,
+      deps.exports,
       viewer,
+      (message) => deps.warn("exports", message),
+      now,
     ),
   };
 }

@@ -5,8 +5,8 @@ import type { ConversationFilter } from "../../../generated/graphql/resolvers";
 import { searchTerms, textQuery } from "../conversations.search.utils";
 import type { ConversationsService } from "./conversations.service";
 
-// Most conversations one search can match.
-const MATCH_CAP = 500;
+// The most conversations one search matches.
+export const SEARCH_CAP = 500;
 
 type Page = {
   first?: number | null | undefined;
@@ -23,6 +23,8 @@ export class SearchService {
     private readonly mongo: Pick<AppMongo, "as" | "db">,
     private readonly conversations: Pick<ConversationsService, "list">,
     private readonly viewer: Viewer | null,
+    // The most conversations one search matches (SEARCH_CAP).
+    private readonly cap: number,
   ) {}
 
   private get actor() {
@@ -34,7 +36,10 @@ export class SearchService {
   // searchable word.
   async list(args: Page) {
     const terms = searchTerms(args.filter?.search);
-    if (terms.length === 0) return this.conversations.list(args);
+    // The trash is listed whole: a search narrows the live list only.
+    if (terms.length === 0 || args.filter?.deleted === true) {
+      return this.conversations.list(args);
+    }
     return this.conversations.list({
       ...args,
       only: await this.matching(textQuery(terms)),
@@ -42,29 +47,53 @@ export class SearchService {
     });
   }
 
-  // The ids of the conversations whose title or whose messages match.
+  // The ids of the live conversations whose title or messages match, the most
+  // recently written first, at most `cap` of them: deleted ones are dropped
+  // before the cap, and the cap keeps the latest.
   private async matching(query: string) {
     const db = this.mongo.as(this.actor).db;
     const search = { $text: { $search: query } };
+    const owned = { ownerId: this.actor };
     const [titles, texts] = await Promise.all([
       db.conversations.raw
         .find(
-          { ownerId: this.actor, deletedAt: null, ...search },
-          { projection: { _id: 1 } },
+          { ...owned, deletedAt: null, ...search },
+          { projection: { _id: 1, lastMessageAt: 1 } },
         )
-        .limit(MATCH_CAP)
+        .sort({ lastMessageAt: -1 })
+        .limit(this.cap)
         .toArray(),
       db.messages.raw
-        .aggregate<{ _id: ObjectId }>([
-          { $match: { ownerId: this.actor, ...search } },
+        .aggregate<{ _id: ObjectId; lastMessageAt: Date }>([
+          { $match: { ...owned, ...search } },
           { $group: { _id: "$conversationId" } },
-          { $limit: MATCH_CAP },
+          {
+            $lookup: {
+              from: "conversations",
+              localField: "_id",
+              foreignField: "_id",
+              as: "conversation",
+              pipeline: [
+                { $match: { ...owned, deletedAt: null } },
+                { $project: { lastMessageAt: 1 } },
+              ],
+            },
+          },
+          { $unwind: "$conversation" },
+          { $sort: { "conversation.lastMessageAt": -1 } },
+          { $limit: this.cap },
+          {
+            $project: { lastMessageAt: "$conversation.lastMessageAt" },
+          },
         ])
         .toArray(),
     ]);
-    const seen = new Map(
-      [...titles, ...texts].map((found) => [String(found._id), found._id]),
+    const latest = new Map(
+      [...titles, ...texts].map((found) => [String(found._id), found]),
     );
-    return [...seen.values()];
+    return [...latest.values()]
+      .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
+      .slice(0, this.cap)
+      .map((found) => found._id);
   }
 }

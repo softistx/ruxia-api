@@ -3,10 +3,13 @@ import {
   mediaObjectKey,
   newMediaKey,
 } from "@softistx/alxia-media";
+import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import type { ExportFormat as ShownFormat } from "../../../generated/graphql/resolvers";
+import type { Throttle } from "../../../limits/ports";
 import { unavailable } from "../../../shared/errors";
+import { limitedExport } from "../conversations.errors";
 import {
   jsonOf,
   jsonType,
@@ -14,23 +17,30 @@ import {
   markdownType,
 } from "../conversations.export.utils";
 import { exportKindName } from "../conversations.media";
-import type { ExportFormat } from "../models";
+import type { ConversationDocument, ExportFormat } from "../models";
 import type { ConversationsService } from "./conversations.service";
 import type { MessagesService } from "./messages.service";
 
 // The bucket calls the exports make, a port the registry passes.
 export type ExportBucket = Pick<MediaBucket, "put" | "delete">;
 
+const placeOf = (key: string) => ({ key: mediaObjectKey(exportKindName, key) });
+
 // Files of a member's conversations, for one request. A Markdown export is the
 // branch shown; a JSON export is the whole tree (every branch, each message
-// with its `parentId`). Only its owner reads one.
+// with its `parentId`). Only its owner reads one, while the conversation is
+// live. There is one record per conversation and format (a unique index): a
+// new export replaces it, and the file it named is removed.
 export class ExportsService {
   constructor(
     private readonly mongo: Pick<AppMongo, "as" | "db">,
     private readonly conversations: Pick<ConversationsService, "find">,
     private readonly messages: Pick<MessagesService, "tree" | "path">,
     private readonly bucket: ExportBucket,
+    private readonly limit: Throttle["exports"],
     private readonly viewer: Viewer | null,
+    private readonly warn: (message: string) => void,
+    private readonly now: () => Date,
   ) {}
 
   private get actor() {
@@ -38,84 +48,102 @@ export class ExportsService {
     return this.viewer;
   }
 
-  private get records() {
-    return this.mongo.as(this.actor.id).db.conversationExports;
-  }
-
   // Stores the conversation as a file and returns its media key; the file is
-  // read at `/media/conversation-exports/<key>`. It replaces the previous
-  // export of the same conversation and format.
+  // read at `/media/conversation-exports/<key>`. A store that fails is 503 and
+  // leaves no record.
   async export(conversationId: string, shown: ShownFormat) {
+    await limitedExport(this.limit(this.actor.id));
     const format: ExportFormat = shown === "MARKDOWN" ? "markdown" : "json";
     const conversation = await this.conversations.find(conversationId);
-    const [body, type] =
-      format === "markdown"
-        ? [
-            markdownOf(
-              conversation,
-              await this.messages.path(conversation, conversation.activeLeafId),
-              this.actor.locale,
-            ),
-            markdownType,
-          ]
-        : [
-            jsonOf(conversation, await this.messages.tree(conversation)),
-            jsonType,
-          ];
-    const previous = await this.records.findMany({
-      filter: { conversationId: conversation._id, format },
-    });
+    const [body, type] = await this.render(conversation, format);
     const key = newMediaKey();
-    await this.store(key, body, type);
     try {
-      await this.records.create({
-        _id: key,
-        ownerId: this.actor.id,
-        conversationId: conversation._id,
-        format,
-      });
-    } catch (error) {
-      await this.bucket.delete({ key: mediaObjectKey(exportKindName, key) });
-      throw error;
-    }
-    for (const old of previous) await this.drop(old._id);
-    return key;
-  }
-
-  private async store(key: string, body: string, type: string) {
-    try {
-      await this.bucket.put(
-        { key: mediaObjectKey(exportKindName, key) },
-        body,
-        {
-          type,
-        },
-      );
+      await this.bucket.put(placeOf(key), body, { type });
     } catch {
       throw unavailable();
     }
+    let replaced: string | undefined;
+    try {
+      replaced = await this.record(conversation._id, format, key);
+    } catch (error) {
+      await this.drop(key);
+      throw error;
+    }
+    if (replaced !== undefined) await this.drop(replaced);
+    return key;
   }
 
-  // An earlier export, its file and its record; a file that cannot be removed
-  // stays for the purge, which sweeps by conversation.
+  private async render(
+    conversation: ConversationDocument,
+    format: ExportFormat,
+  ) {
+    if (format === "json") {
+      const tree = await this.messages.tree(conversation);
+      return [jsonOf(conversation, tree), jsonType] as const;
+    }
+    const path = await this.messages.path(
+      conversation,
+      conversation.activeLeafId,
+    );
+    return [
+      markdownOf(conversation, path, this.actor.locale),
+      markdownType,
+    ] as const;
+  }
+
+  // Points the conversation's record for `format` at `key` (raw: an upsert
+  // that hands back what it replaced, which the typed one does not) and
+  // returns the replaced key.
+  private async record(
+    conversationId: ObjectId,
+    format: ExportFormat,
+    key: string,
+  ) {
+    const at = this.now();
+    const raw = this.mongo.as(this.actor.id).db.conversationExports.raw;
+    const upsert = () =>
+      raw.findOneAndUpdate(
+        { conversationId, format },
+        {
+          $set: { key, ownerId: this.actor.id, updatedAt: at },
+          $setOnInsert: { _id: new ObjectId(), createdAt: at },
+        },
+        { upsert: true, returnDocument: "before" },
+      );
+    try {
+      return (await upsert())?.key;
+    } catch (error) {
+      // Two exports raced to insert the first record: the loser updates it.
+      if ((error as { code?: number }).code !== 11000) throw error;
+      return (await upsert())?.key;
+    }
+  }
+
+  // A file nobody names any more; one that cannot be removed is logged and
+  // left (the purge sweeps by conversation, and nothing reads it).
   private async drop(key: string) {
     try {
-      await this.bucket.delete({ key: mediaObjectKey(exportKindName, key) });
-      await this.records.hardDelete(key);
-    } catch {
-      // Left in place: the record keeps naming the file.
+      await this.bucket.delete(placeOf(key));
+    } catch (error) {
+      this.warn(`export file not removed: ${(error as Error).name}`);
     }
   }
 }
 
 // Who may read an export file, for the media route (`conversations.media.ts`):
-// its owner, nobody else (the admin's read is a 404 like anyone's).
+// its owner, while the conversation is live (a deleted conversation's exports
+// are 404 until it is restored). The admin's read is a 404 like anyone's.
 export class ExportFiles {
   constructor(private readonly mongo: Pick<AppMongo, "db">) {}
 
-  mayRead(viewerId: string, key: string) {
-    return this.mongo.db.conversationExports.exists({
-      _id: key,
+  async mayRead(viewerId: string, key: string) {
+    const file = await this.mongo.db.conversationExports.findFirst({
+      key,
+      ownerId: viewerId,
+    });
+    if (file === undefined) return false;
+    return this.mongo.db.conversations.exists({
+      _id: file.conversationId,
       ownerId: viewerId,
     });
   }

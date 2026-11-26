@@ -22,6 +22,7 @@ test("builds the nine conversations services, wired to the viewer", async () => 
     background: kit.auth.background,
     sends: unthrottled.sends,
     media: memoryBucket().bucket,
+    exports: unthrottled.exports,
     warn: () => {},
     now: () => new Date(),
   });

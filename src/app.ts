@@ -20,14 +20,14 @@ import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
 import {
   ExportFiles,
-  exportRoutes,
   type ModelAdapters,
   type RunOptions,
   runEvents,
   runTransport,
 } from "./modules/conversations";
+import { appMedia } from "./modules/media";
 import type { StatusStore } from "./modules/models";
-import { AvatarsService, avatarRoutes } from "./modules/personas";
+import { AvatarsService } from "./modules/personas";
 import { type Services, services } from "./modules/services";
 import { cataloguesLoaded } from "./modules/translations";
 
@@ -138,16 +138,19 @@ export function createApp(
       // The answers being written, beside /graphql: the same viewer and client
       // header, the events of a run a client follows and resumes.
       .plugin(runEvents(runtime, heartbeatMs))
-      // The files, beside /graphql: the viewer is resolved above, the kinds'
-      // callbacks read it. Mounted before the body limit, which is /graphql's.
+      // The files, beside /graphql (the persona avatars and the exports of
+      // conversations): the viewer is resolved above, the kinds' callbacks
+      // read it. Mounted before the body limit, which is /graphql's.
       .plugin(
-        avatarRoutes(
-          { avatars: new AvatarsService(appMongo), throttle },
+        appMedia(
+          {
+            avatars: new AvatarsService(appMongo),
+            exports: new ExportFiles(appMongo),
+            throttle,
+          },
           media,
         ),
       )
-      // The exports of conversations, on the same bucket: read by their owner.
-      .plugin(exportRoutes({ exports: new ExportFiles(appMongo) }, media))
       // A body past 100 KiB is refused (413) before it is read, for /graphql
       // below: a query is a few kilobytes (alxia's production guide, "Cap the body").
       .bodyLimit(BODY_LIMIT)

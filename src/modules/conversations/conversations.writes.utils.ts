@@ -178,3 +178,40 @@ export const pushReactionWrite = (input: {
     ...bump,
   },
 });
+
+// The conversation brought back, only while it was deleted within the window
+// and the purge has not taken it.
+export const restoreConversationWrite = (input: {
+  conversationId: ObjectId;
+  actor: string;
+  since: Date;
+  at: Date;
+}) => ({
+  filter: {
+    _id: input.conversationId,
+    ownerId: input.actor,
+    deletedAt: { $gte: input.since },
+    purgingAt: null,
+  },
+  update: {
+    $set: { deletedAt: null, ...stamp(input.actor, input.at) },
+    ...bump,
+  },
+});
+
+// A conversation due for the purge, taken: only while it is past the window
+// and no other purge holds it (or the hold is stale). Once taken, a restore
+// misses, so what the purge deletes next is never a live conversation.
+export const claimPurgeWrite = (input: {
+  conversationId: ObjectId;
+  before: Date;
+  staleBefore: Date;
+  at: Date;
+}) => ({
+  filter: {
+    _id: input.conversationId,
+    deletedAt: { $lt: input.before },
+    $or: [{ purgingAt: null }, { purgingAt: { $lt: input.staleBefore } }],
+  },
+  update: { $set: { purgingAt: input.at } },
+});

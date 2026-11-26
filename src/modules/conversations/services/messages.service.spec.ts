@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { ObjectId } from "mongodb";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { Collection, ObjectId } from "mongodb";
 import { authApp } from "~/auth";
 import { memberOf, sonnet } from "~/conversations";
 import { appMongo } from "../../../config/db";
@@ -288,5 +288,50 @@ describe("MessagesService: the context", () => {
       })
     ).map((m) => m.contextSummary?.text);
     expect(stored).toEqual(["folded"]);
+  });
+});
+
+describe("MessagesService: siblings, find and pins", () => {
+  test("siblings are the messages of one parent in order, and a page of messages costs one read", async () => {
+    const ada = await memberOf(kit);
+    const id = await started(ada);
+    const first = await exchange(ada, id, null, "one");
+    const second = await exchange(ada, id, first.assistant._id, "two");
+    const edit = await exchange(ada, id, first.assistant._id, "two, edited");
+    const conversation = await ada.conversations.find(id);
+    const tree = await ada.messages.tree(conversation);
+    expect(await ada.messages.siblings(edit.user)).toEqual({
+      ids: [String(second.user._id), String(edit.user._id)],
+      index: 1,
+    });
+    const reads = spyOn(Collection.prototype, "find");
+    try {
+      const shown = await Promise.all(
+        tree.map((message) => ada.messages.siblings(message)),
+      );
+      expect(shown).toHaveLength(tree.length);
+      expect(reads).toHaveBeenCalledTimes(1);
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
+  test("find is the viewer's own message in a live conversation, nothing else", async () => {
+    const ada = await memberOf(kit);
+    const bea = await memberOf(kit);
+    const id = await started(ada);
+    const first = await exchange(ada, id, null);
+    const key = String(first.user._id);
+    expect((await ada.messages.find(key))._id).toEqual(first.user._id);
+    for (const other of [bea, ada]) {
+      const target = other === ada ? "nope" : key;
+      await expect(other.messages.find(target)).rejects.toMatchObject({
+        extensions: { code: "conversations.errors.message-not-found" },
+      });
+    }
+    await ada.conversations.delete(id);
+    await expect(ada.messages.find(key)).rejects.toMatchObject({
+      extensions: { code: "conversations.errors.message-not-found" },
+    });
   });
 });

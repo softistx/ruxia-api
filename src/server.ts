@@ -9,6 +9,8 @@ import { redis, serverStatuses } from "./config/redis";
 import { MigrationsOutOfSyncError } from "./migrations/status";
 import {
   ConversationsPurge,
+  PURGE_BATCH,
+  PURGE_BUDGET_MS,
   PURGE_INTERVAL_MS,
   sweepRuns,
 } from "./modules/conversations";
@@ -92,6 +94,8 @@ const purge = new ConversationsPurge({
   ticker: intervalTicker,
   now: () => new Date(),
   intervalMs: PURGE_INTERVAL_MS,
+  batch: PURGE_BATCH,
+  budgetMs: PURGE_BUDGET_MS,
   log: (message) => console.warn(message),
 });
 purge.start();

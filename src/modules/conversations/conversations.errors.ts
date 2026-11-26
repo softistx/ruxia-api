@@ -22,6 +22,7 @@ export const codes = defineCodes("conversations", [
   "invalid-emoji",
   "reaction-limit",
   "restore-expired",
+  "too-many-exports",
 ]);
 
 // An id that names no conversation of the viewer (or a malformed one).
@@ -74,6 +75,26 @@ export const reactionLimit = () =>
 // The 30 days a deleted conversation can be restored in have passed.
 export const restoreExpired = () =>
   fail("conversations.errors.restore-expired", { status: 409 });
+
+// Past the exports' limit: when to try again, in seconds and minutes.
+export const tooManyExports = (retryAfter: number) => {
+  const params = retryParams(retryAfter);
+  return fail("conversations.errors.too-many-exports", {
+    status: 429,
+    params,
+    extensions: params,
+  });
+};
+
+// Counts an export against the account's limit; a refusal is 429.
+export async function limitedExport(limit: () => Promise<void>) {
+  try {
+    await limit();
+  } catch (error) {
+    if (error instanceof Throttled) throw tooManyExports(error.retryAfter);
+    throw error;
+  }
+}
 
 // Past the sends' limit: when to try again, in seconds and minutes.
 export const tooManyMessages = (retryAfter: number) => {

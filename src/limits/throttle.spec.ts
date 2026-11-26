@@ -40,6 +40,7 @@ function fakeLimits() {
     clientTokens: bound("clientTokens"),
     mediaUploads: bound("mediaUploads"),
     messageSends: bound("messageSends"),
+    conversationExports: bound("conversationExports"),
   };
   return { limits, calls, answers, broken };
 }
@@ -170,5 +171,28 @@ describe("the sends limit", () => {
     );
     await throttle().sends("viewer-1")();
     expect(logs).toEqual(["rate limit messageSends unavailable: TIMEOUT"]);
+  });
+});
+
+describe("the exports limit", () => {
+  test("counts one export per account", async () => {
+    await throttle().exports("viewer-1")();
+    expect(fake.calls).toContainEqual({
+      limit: "conversationExports",
+      use: "consume",
+      options: deadline,
+    });
+  });
+
+  test("a refusal is Throttled with the wait, and a store that is down fails open", async () => {
+    fake.answers["conversationExports"] = 2_500;
+    const error = await refusal(throttle().exports("viewer-1")());
+    expect(error).toMatchObject({ limit: "exports", retryAfter: 3 });
+    fake.answers["conversationExports"] = 0;
+    fake.broken.set(
+      "conversationExports",
+      new GuardError("TIMEOUT", "conversation-exports", "timed out"),
+    );
+    await throttle().exports("viewer-1")();
   });
 });

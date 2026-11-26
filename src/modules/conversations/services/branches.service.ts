@@ -4,6 +4,7 @@ import { deepestLeaf } from "../conversations.branches.utils";
 import { messageNotFound, runInProgress } from "../conversations.errors";
 import { setLeafWrite } from "../conversations.writes.utils";
 import type { ConversationsService } from "./conversations.service";
+import type { IdleService } from "./idle.service";
 import type { MessagesService } from "./messages.service";
 
 // Which branch of a conversation's tree is shown, for one request. The model's
@@ -15,6 +16,7 @@ export class BranchesService {
     private readonly messages: Pick<MessagesService, "tree">,
     private readonly viewer: Viewer | null,
     private readonly now: () => Date,
+    private readonly idle: Pick<IdleService, "require">,
   ) {}
 
   private get actor() {
@@ -31,7 +33,7 @@ export class BranchesService {
     if (!tree.some((message) => String(message._id) === messageId)) {
       throw messageNotFound();
     }
-    if (conversation.activeRunId !== null) throw runInProgress();
+    await this.idle.require(conversation);
     const leaf = deepestLeaf(tree, messageId);
     const leafId = tree.find((message) => String(message._id) === leaf)?._id;
     if (leafId === undefined) throw messageNotFound();

@@ -4,5 +4,6 @@
   "conversations.errors.not-regenerable": "Seule une réponse peut être générée à nouveau.",
   "conversations.errors.invalid-emoji": "Une réaction est un seul émoji.",
   "conversations.errors.reaction-limit": "Ce message porte déjà le maximum de réactions.",
-  "conversations.errors.restore-expired": "Cette conversation a été supprimée il y a plus de 30 jours et ne peut plus être restaurée."
+  "conversations.errors.restore-expired": "Cette conversation a été supprimée il y a plus de 30 jours et ne peut plus être restaurée.",
+  "conversations.errors.too-many-exports": "Vous exportez trop souvent : réessayez dans {minutes, plural, one {# minute} other {# minutes}}."
 }

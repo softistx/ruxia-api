@@ -165,5 +165,10 @@ export function emojiIssues(emoji: string): FieldIssue[] {
 // How long a deleted conversation can be restored, and then purged after.
 export const RESTORE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
-export const isRestorable = (deletedAt: Date, now: Date) =>
-  now.getTime() - deletedAt.getTime() <= RESTORE_WINDOW_MS;
+// How long a purge's hold lasts before another may take over a conversation a
+// crashed purge left.
+export const PURGE_HOLD_MS = 60 * 60 * 1000;
+
+// When a deleted conversation is purged for good.
+export const purgeAt = (deletedAt: Date) =>
+  new Date(deletedAt.getTime() + RESTORE_WINDOW_MS);

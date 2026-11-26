@@ -1,9 +1,4 @@
-import {
-  defineMediaKind,
-  type MediaBucket,
-  type MediaKey,
-  mediaRoutes,
-} from "@softistx/alxia-media";
+import { defineMediaKind, type MediaKey } from "@softistx/alxia-media";
 import type { Viewer } from "../../auth/viewer";
 import { jsonType, markdownType } from "./conversations.export.utils";
 import type { ExportFiles } from "./services/exports.service";
@@ -30,12 +25,4 @@ export function exportKind(ports: { exports: Pick<ExportFiles, "mayRead"> }) {
     attachment: true,
     cacheControl: "private, no-cache",
   });
-}
-
-// The `/media` route of the exports over the private bucket.
-export function exportRoutes(
-  ports: { exports: Pick<ExportFiles, "mayRead"> },
-  bucket: MediaBucket,
-) {
-  return mediaRoutes([exportKind(ports)], { bucket });
 }

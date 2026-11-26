@@ -75,6 +75,7 @@ export function services(deps: {
     background: deps.auth.background,
     sends: deps.throttle.sends,
     media: deps.media,
+    exports: deps.throttle.exports,
     warn: statusWarning,
     now: deps.now,
   });

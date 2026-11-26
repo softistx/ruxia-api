@@ -22,10 +22,14 @@ import type {
   ConversationModels,
   ConversationPersonas,
 } from "../conversations.integrity";
-import { isRestorable } from "../conversations.rules";
+import { RESTORE_WINDOW_MS } from "../conversations.rules";
 import { isPersonaMissing } from "../conversations.utils";
-import { deleteConversationWrite } from "../conversations.writes.utils";
+import {
+  deleteConversationWrite,
+  restoreConversationWrite,
+} from "../conversations.writes.utils";
 import type { ConversationDocument } from "../models";
+import type { IdleService } from "./idle.service";
 
 type Page = {
   first?: number | null | undefined;
@@ -47,6 +51,7 @@ export class ConversationsService {
     private readonly personas: ConversationPersonas,
     private readonly viewer: Viewer | null,
     private readonly now: () => Date,
+    private readonly idle: Pick<IdleService, "require">,
   ) {}
 
   // The acting account: reached only past the guards.
@@ -85,15 +90,21 @@ export class ConversationsService {
   }
 
   // The member's conversations, last written first; the empty ones (nothing
-  // said yet) are left out.
+  // said yet) are left out. With `filter.deleted`, the trash instead: the ones
+  // deleted within the 30 days, the latest deletion first.
   async list(args: Page) {
     const personaId = args.filter?.personaId ?? undefined;
     if (personaId !== undefined && !isObjectIdString(personaId)) {
       return toConnection(args.after, { items: [], nextCursor: null }, 0);
     }
+    const trash = args.filter?.deleted === true;
     const filter = {
       ownerId: this.actor,
       activeLeafId: { $ne: null },
+      ...(trash && {
+        deletedAt: { $gte: new Date(this.now().getTime() - RESTORE_WINDOW_MS) },
+        purgingAt: null,
+      }),
       ...(personaId !== undefined && { personaId }),
       ...(args.only !== undefined && { _id: { $in: [...args.only] } }),
     };
@@ -101,17 +112,19 @@ export class ConversationsService {
       const [page, total] = await Promise.all([
         this.conversations.paginateByCursor({
           filter,
-          orderBy: "lastMessageAt",
+          orderBy: trash ? "deletedAt" : "lastMessageAt",
           direction: "desc",
+          withDeleted: trash,
           limit: args.first ?? 20,
           after: args.after,
           scope: cursorScopeOf("conversations", [
             this.actor,
             personaId ?? null,
+            ...(trash ? ["deleted"] : []),
             ...(args.searched === undefined ? [] : [args.searched]),
           ]),
         }),
-        this.conversations.count(filter),
+        this.conversations.count(filter, { withDeleted: trash }),
       ]);
       return toConnection(args.after, page, total);
     } catch (error) {
@@ -124,6 +137,7 @@ export class ConversationsService {
   // (stop it first). Restorable for 30 days.
   async delete(id: string) {
     const conversation = await this.find(id);
+    await this.idle.require(conversation);
     const { filter, update } = deleteConversationWrite({
       conversationId: conversation._id,
       actor: this.actor,
@@ -135,15 +149,33 @@ export class ConversationsService {
   }
 
   // Brings a deleted conversation back, within 30 days of its deletion; a
-  // live one is returned as it is.
+  // live one is returned as it is. One conditional write: a conversation the
+  // purge has taken, or past the window, is `restore-expired`, and one that is
+  // gone is `not-found`.
   async restore(id: string) {
+    const found = await this.deleted(id);
+    if (found.deletedAt === null) return found;
+    const { filter, update } = restoreConversationWrite({
+      conversationId: found._id,
+      actor: this.actor,
+      since: new Date(this.now().getTime() - RESTORE_WINDOW_MS),
+      at: this.now(),
+    });
+    const done = await this.conversations.raw.updateOne(filter, update);
+    if (done.matchedCount === 0) {
+      await this.deleted(id);
+      throw restoreExpired();
+    }
+    return this.conversations.getById(found._id);
+  }
+
+  // One of the member's conversations, deleted or not; not-found otherwise.
+  private async deleted(id: string) {
     const found = isObjectIdString(id)
       ? await this.conversations.findById(id, { withDeleted: true })
       : undefined;
     if (!found || found.ownerId !== this.actor) throw notFound();
-    if (found.deletedAt === null) return found;
-    if (!isRestorable(found.deletedAt, this.now())) throw restoreExpired();
-    return this.conversations.restore(found._id);
+    return found;
   }
 
   // The model the next message goes to: enabled, as at the start.

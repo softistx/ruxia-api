@@ -9,9 +9,9 @@ import {
   compactionBudget,
   emojiIssues,
   finishOf,
-  isRestorable,
   languageName,
   parentIssues,
+  purgeAt,
   RESTORE_WINDOW_MS,
   statusOf,
   systemOf,
@@ -230,11 +230,11 @@ describe("emojiIssues", () => {
   });
 });
 
-describe("isRestorable", () => {
-  test("holds for 30 days after the deletion", () => {
+describe("purgeAt", () => {
+  test("is 30 days after the deletion", () => {
     const deleted = new Date("2030-01-01T00:00:00Z");
-    const at = (ms: number) => new Date(deleted.getTime() + ms);
-    expect(isRestorable(deleted, at(RESTORE_WINDOW_MS))).toBe(true);
-    expect(isRestorable(deleted, at(RESTORE_WINDOW_MS + 1))).toBe(false);
+    expect(purgeAt(deleted).getTime() - deleted.getTime()).toBe(
+      RESTORE_WINDOW_MS,
+    );
   });
 });

@@ -173,6 +173,10 @@ type Conversation {
   personaId: ID!
   """The persona's name and avatar when the conversation started."""
   personaSnapshot: PersonaSnapshot!
+  """
+  When it will be purged for good (30 days after it was deleted); null while it is live.
+  """
+  purgeAt: DateTime
   """A short title written after the first exchange; null until then."""
   title: String
   """When it last changed."""
@@ -201,6 +205,12 @@ type ConversationEdge {
 
 """What `conversations` narrows to."""
 input ConversationFilter {
+  """
+  True lists the trash instead: the member's conversations deleted less than
+  30 days ago (restorable), the latest deletion first. A search does not apply
+  to it. False or left out lists the live ones.
+  """
+  deleted: Boolean
   """Only the conversations held with this persona."""
   personaId: ID @constraint(maxLength: 64)
   """
