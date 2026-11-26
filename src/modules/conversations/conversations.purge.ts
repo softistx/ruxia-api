@@ -1,6 +1,8 @@
 import type { MediaBucket } from "@softistx/alxia-media";
 import type { ObjectId } from "mongodb";
 import type { AppMongo } from "../../config/db";
+import type { AttachmentsPurge } from "../attachments/attachments.purge";
+import { UNLINKED_TTL_MS } from "../attachments/attachments.rules";
 import type { Ticker } from "../models";
 import { exportPlace } from "./conversations.media";
 import { PURGE_HOLD_MS, RESTORE_WINDOW_MS } from "./conversations.rules";
@@ -18,6 +20,7 @@ export const PURGE_DEADLINE_MS = 5 * 60 * 1000;
 export interface PurgePorts {
   mongo: Pick<AppMongo, "db">;
   media: Pick<MediaBucket, "delete">;
+  attachments: Pick<AttachmentsPurge, "ofConversation" | "sweepUnlinked">;
   ticker: Ticker;
   now: () => Date;
   intervalMs: number;
@@ -30,7 +33,8 @@ export interface PurgePorts {
 }
 
 // Hard-deletes the conversations soft-deleted more than 30 days ago, with
-// their messages and exports (the files and their records). Started daily from
+// their messages, exports and attachments (the files and their records), and
+// the uploads no message carried within 24 hours. Started daily from
 // src/server.ts only, never in tests, which call `tick` themselves. It is a
 // system job: it reads and deletes across owners (raw, no viewer), and exposes
 // no content. Each conversation is taken by one conditional write
@@ -77,12 +81,19 @@ export class ConversationsPurge {
         purged += taken;
         if (due.length < this.ports.batch || taken === 0 || over()) break;
       }
+      await this.sweepUploads();
     } catch (error) {
       this.ports.log(`purge failed: ${(error as Error).name}`);
     } finally {
       this.running = false;
     }
     return purged;
+  }
+
+  // The uploads no message carried within 24 hours: files and records.
+  private async sweepUploads() {
+    const before = new Date(this.ports.now().getTime() - UNLINKED_TTL_MS);
+    await this.ports.attachments.sweepUnlinked(before);
   }
 
   // One conversation's purge, given up on (logged, its hold left to go stale)
@@ -124,7 +135,7 @@ export class ConversationsPurge {
   // Takes the conversation, then deletes: files, records, messages, and the
   // conversation last, so a failure leaves it held and retried later.
   private async purge(conversationId: ObjectId) {
-    const { mongo, media, log, now } = this.ports;
+    const { mongo, media, attachments, log, now } = this.ports;
     try {
       const at = now();
       const claim = claimPurgeWrite({
@@ -143,6 +154,7 @@ export class ConversationsPurge {
         await media.delete(exportPlace(file.key));
       }
       await exports.deleteMany({ conversationId });
+      await attachments.ofConversation(conversationId);
       await mongo.db.messages.raw.deleteMany({ conversationId });
       await mongo.db.conversations.raw.deleteOne({
         _id: conversationId,

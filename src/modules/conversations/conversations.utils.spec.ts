@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentEvent, Message, Usage } from "@softistx/ai-core";
+import {
+  type AgentEvent,
+  DOCUMENT_TOKENS,
+  IMAGE_TOKENS,
+  type Message,
+  type Usage,
+} from "@softistx/ai-core";
 import { ObjectId } from "mongodb";
 import {
+  attachmentTokens,
   contextOf,
   costFor,
   isPersonaMissing,
@@ -235,5 +242,51 @@ describe("isPersonaMissing", () => {
       isPersonaMissing({ extensions: { code: "personas.errors.not-found" } }),
     ).toBe(true);
     expect(isPersonaMissing(new Error("x"))).toBe(false);
+  });
+});
+
+describe("attachments in messages", () => {
+  const ref = {
+    type: "attachment" as const,
+    key: "11111111-1111-4111-8111-111111111111",
+    kind: "pdf" as const,
+    name: "doc.pdf",
+    mime: "application/pdf",
+    bytes: 10,
+  };
+  test("a reference is shown by key, kind, name, mime and size, never a URL", () => {
+    expect(shownParts([{ type: "text", text: "Hi" }, ref])).toEqual([
+      { __typename: "MessageTextPart", text: "Hi" },
+      {
+        __typename: "MessageAttachmentPart",
+        key: ref.key,
+        kind: "PDF",
+        name: "doc.pdf",
+        mime: "application/pdf",
+        bytes: 10,
+      },
+    ]);
+  });
+
+  test("the model messages and the fold read a reference as its name", () => {
+    expect(toModelMessages([message("user", [ref])])[0]?.parts).toEqual([
+      { type: "text", text: "[Attachment: doc.pdf]" },
+    ]);
+    expect(toStored([message("user", [ref])])[0]?.message.parts).toEqual([
+      { type: "text", text: "[Attachment: doc.pdf]" },
+    ]);
+  });
+
+  test("the attachments of the kept messages are estimated for the budget", () => {
+    const image = { ...ref, kind: "image" as const };
+    expect(
+      attachmentTokens([
+        message("user", [ref]),
+        message("user", [image, image]),
+      ]),
+    ).toBe(DOCUMENT_TOKENS + 2 * IMAGE_TOKENS);
+    expect(
+      attachmentTokens([message("user", [{ type: "text", text: "x" }])]),
+    ).toBe(0);
   });
 });

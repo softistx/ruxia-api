@@ -44,8 +44,11 @@ type MessageThinkingPart {
   text: String!
 }
 
-"A part of a message, in order. Tool calls and results are not shown yet."
-union MessagePart = MessageTextPart | MessageThinkingPart
+"A part of a message, in order: text, reasoning, or an attachment reference (a member's message). Tool calls and results are not shown yet."
+union MessagePart =
+  | MessageTextPart
+  | MessageThinkingPart
+  | MessageAttachmentPart
 
 """
 A message of a conversation's tree (spec 4.5): `parentId` is the message it

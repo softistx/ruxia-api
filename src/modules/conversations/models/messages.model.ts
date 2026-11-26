@@ -6,6 +6,7 @@ import {
 } from "@softistx/mongo";
 import { z } from "zod";
 import { accountId, actors } from "../../../shared/actors";
+import { attachmentPart } from "../../attachments/attachments.model";
 
 export const messageRoles = ["user", "assistant"] as const;
 export type MessageRole = (typeof messageRoles)[number];
@@ -19,7 +20,7 @@ export const messageStatuses = [
 export type MessageStatus = (typeof messageStatuses)[number];
 
 // The parts of a message, flat, in the shapes of `@softistx/ai-core`'s `Part`
-// (images land with the attachments). A tool result is the SDK's union of a
+// (a member's message also holds `attachment` references, see the attachments module). A tool result is the SDK's union of a
 // value and an error.
 const textPart = z.object({ type: z.literal("text"), text: z.string() });
 const thinkingPart = z.object({
@@ -71,6 +72,7 @@ export const messagePart = z.union([
   toolCallPart,
   toolResultPart,
   proposedActionPart,
+  attachmentPart,
 ]);
 export type StoredPart = z.infer<typeof messagePart>;
 

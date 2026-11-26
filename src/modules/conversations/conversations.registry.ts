@@ -5,6 +5,7 @@ import type { Throttle } from "../../limits/throttle";
 import type { Background } from "../../shared/background";
 import type { ModelAdapters } from "./conversations.adapters";
 import type {
+  ConversationAttachments,
   ConversationBudgets,
   ConversationModels,
   ConversationPersonas,
@@ -29,6 +30,7 @@ export type ConversationsDeps = {
   models: ConversationModels;
   budgets: ConversationBudgets;
   personas: ConversationPersonas;
+  attachments: ConversationAttachments;
   adapters: ModelAdapters;
   titleModelId: string;
   runtime: ConversationsRuntime;
@@ -68,6 +70,7 @@ function runServices(deps: ConversationsDeps, shared: Shared) {
       models,
       budgets: deps.budgets,
       personas,
+      attachments: deps.attachments,
       adapters: deps.adapters,
       runtime: deps.runtime,
       observers: deps.observers,
@@ -85,7 +88,12 @@ function runServices(deps: ConversationsDeps, shared: Shared) {
 export function conversationsServices(deps: ConversationsDeps) {
   const { mongo, viewer, models, personas, now } = deps;
   const messages = new MessagesService(mongo, viewer, now);
-  const runMessages = new RunMessagesService(mongo, viewer, now);
+  const runMessages = new RunMessagesService(
+    mongo,
+    viewer,
+    now,
+    deps.attachments,
+  );
   const idle = new IdleService(deps.runtime, runMessages);
   const conversations = new ConversationsService(
     mongo,

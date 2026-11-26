@@ -1,6 +1,7 @@
 import { mergeResolvers } from "@graphql-tools/merge";
 import type { Resolvers } from "@/generated/graphql/resolvers";
 import { accounts } from "./accounts/accounts.resolver";
+import { attachments } from "./attachments/resolvers/attachments.resolver";
 import { budgets } from "./budgets/budgets.resolver";
 import { branches } from "./conversations/resolvers/branches.resolver";
 import { conversations } from "./conversations/resolvers/conversations.resolver";
@@ -19,6 +20,7 @@ import { translationResolvers } from "./translations/translations.resolver";
 // `verify`, with no MongoDB) loads this file.
 export const resolvers = mergeResolvers([
   accounts,
+  attachments,
   branches,
   budgets,
   conversations,

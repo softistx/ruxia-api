@@ -6,6 +6,7 @@ import { clearBudgets } from "~/budgets";
 import { ask, memberOf, scripted, startedBy } from "~/conversations";
 import { memoryBucket } from "~/media";
 import { appMongo } from "../../config/db";
+import { AttachmentsPurge, attachmentPlace } from "../attachments";
 import {
   ConversationsPurge,
   PURGE_BATCH,
@@ -30,6 +31,7 @@ type Member = Awaited<ReturnType<typeof memberOf>>;
 const purgeOf = (ports: Partial<PurgePorts> & Pick<PurgePorts, "media">) =>
   new ConversationsPurge({
     mongo: appMongo,
+    attachments: new AttachmentsPurge(appMongo, ports.media),
     ticker: () => () => {},
     now: () => new Date(),
     intervalMs: 1,
@@ -325,5 +327,51 @@ describe("ConversationsPurge", () => {
     await appMongo.db.conversationExports.raw.deleteMany({
       conversationId: { $in: ids },
     });
+  });
+
+  test("purges the conversation's attachments with it, and sweeps the stale uploads on the same tick", async () => {
+    const { bucket, objects } = memoryBucket();
+    const ada = await memberOf(kit, {
+      adapters: scripted("a"),
+      media: bucket,
+    });
+    const old = await deletedAgo(ada, RESTORE_WINDOW_MS + day);
+    const key = crypto.randomUUID();
+    await bucket.put(attachmentPlace(key), new Uint8Array([1]), {
+      type: "text/plain",
+    });
+    await appMongo.as(ada.id).db.attachments.create({
+      ownerId: ada.id,
+      key,
+      kind: "text",
+      mime: "text/plain",
+      bytes: 1,
+      name: "n",
+      conversationId: old,
+      messageId: new ObjectId(),
+    });
+    const stale = crypto.randomUUID();
+    await bucket.put(attachmentPlace(stale), new Uint8Array([1]), {
+      type: "text/plain",
+    });
+    const record = await appMongo.as(ada.id).db.attachments.create({
+      ownerId: ada.id,
+      key: stale,
+      kind: "text",
+      mime: "text/plain",
+      bytes: 1,
+      name: "stale",
+    });
+    await appMongo.db.attachments.raw.updateOne(
+      { _id: record._id },
+      { $set: { createdAt: new Date(Date.now() - 2 * day) } },
+    );
+    await purgeOf({ media: bucket }).tick();
+    expect(await appMongo.db.attachments.raw.findOne({ key })).toBeNull();
+    expect(objects.has(`attachments/${key}`)).toBe(false);
+    expect(
+      await appMongo.db.attachments.raw.findOne({ key: stale }),
+    ).toBeNull();
+    expect(objects.has(`attachments/${stale}`)).toBe(false);
   });
 });

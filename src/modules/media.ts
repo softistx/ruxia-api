@@ -1,5 +1,11 @@
 import { type MediaBucket, mediaRoutes } from "@softistx/alxia-media";
 import type { Throttle } from "../limits/throttle";
+import {
+  attachmentKind,
+  attachmentsKindName,
+  attachmentUploaded,
+} from "./attachments/attachments.media";
+import type { AttachmentFiles } from "./attachments/services/attachment-files.service";
 import { exportKind } from "./conversations/conversations.media";
 import type { ExportFiles } from "./conversations/services/exports.service";
 import {
@@ -14,19 +20,32 @@ import type { AvatarsService } from "./personas/services/avatars.service";
 export type MediaPorts = {
   avatars: Pick<AvatarsService, "mayRead" | "count" | "record">;
   exports: Pick<ExportFiles, "mayRead">;
+  attachments: Pick<AttachmentFiles, "mayRead" | "count" | "record">;
   throttle: Pick<Throttle, "uploads">;
 };
 
-// The one `/media` mount, over the private bucket: `persona-avatars` (members
-// upload, counted and recorded) and `conversation-exports` (never uploaded
-// over HTTP, read by the owner). Each kind carries its own authorization,
-// throttle and quota; the upload hook below serves the avatars only.
+// The one `/media` mount, over the private bucket: `persona-avatars` and
+// `attachments` (members upload, counted and recorded) and
+// `conversation-exports` (never uploaded over HTTP, read by the owner). Each
+// kind carries its own authorization, throttle and quota; the upload hook
+// below dispatches on the kind.
 export function appMedia(ports: MediaPorts, bucket: MediaBucket) {
   return mediaRoutes(
-    [avatarKind(ports), exportKind({ exports: ports.exports })],
+    [
+      avatarKind(ports),
+      exportKind({ exports: ports.exports }),
+      attachmentKind({ files: ports.attachments, throttle: ports.throttle }),
+    ],
     {
       bucket,
       uploaded: (uploaded, ctx) => {
+        if (uploaded.kind === attachmentsKindName) {
+          return attachmentUploaded(
+            { files: ports.attachments, bucket },
+            uploaded,
+            ctx,
+          );
+        }
         if (uploaded.kind !== personaAvatarName) {
           throw new Error(`no upload is expected for ${uploaded.kind}`);
         }

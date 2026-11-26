@@ -101,6 +101,44 @@ directive @listSize(
   slicingArguments: [String!]
 ) on FIELD_DEFINITION
 
+"""
+A file the member uploaded to send with a message (spec 4.6): `PUT /media/attachments`
+with the file as the body and its name in `x-file-name` answers `{ id, key, contentType,
+size, kind, name }`; the file is read at `GET /media/attachments/<key>`, by its owner
+alone, while its conversation is live. Only its owner reads one: another member
+gets `attachments.errors.not-found`, and so does the admin. Never a URL.
+"""
+type Attachment {
+  """Its size in bytes."""
+  bytes: Int!
+  """The conversation it was sent in; null until a message carries it."""
+  conversationId: ID
+  """When it was uploaded."""
+  createdAt: DateTime!
+  """The id `sendMessage` takes in `attachmentIds`."""
+  id: ID!
+  """The media key of the file (never a URL)."""
+  key: String!
+  """What kind of file it is."""
+  kind: AttachmentKind!
+  """The message that first carried it; null until then."""
+  messageId: ID
+  """The content type the server checked."""
+  mime: String!
+  """The name the file was uploaded with."""
+  name: String!
+}
+
+"""What kind of file an attachment is."""
+enum AttachmentKind {
+  """A JPEG, PNG, WebP or GIF picture (10 MB at most)."""
+  IMAGE
+  """A PDF (20 MB at most)."""
+  PDF
+  """A plain text, Markdown, CSV or JSON file, valid UTF-8 (20 MB at most)."""
+  TEXT
+}
+
 """Standard base64 with padding, in its canonical spelling."""
 scalar Base64 @specifiedBy(url: "https://www.rfc-editor.org/rfc/rfc4648#section-4")
 
@@ -646,6 +684,20 @@ type Message {
   usage: Usage
 }
 
+"""An attachment as a message holds it: its key, never its file or a URL."""
+type MessageAttachmentPart {
+  """Its size in bytes."""
+  bytes: Int!
+  """The media key of the file."""
+  key: String!
+  """What kind of file it is."""
+  kind: AttachmentKind!
+  """The content type."""
+  mime: String!
+  """The name of the file."""
+  name: String!
+}
+
 """A page of messages."""
 type MessageConnection {
   """The messages of the page."""
@@ -663,9 +715,9 @@ type MessageEdge {
 }
 
 """
-A part of a message, in order. Tool calls and results are not shown yet.
+A part of a message, in order: text, reasoning, or an attachment reference (a member's message). Tool calls and results are not shown yet.
 """
-union MessagePart = MessageTextPart | MessageThinkingPart
+union MessagePart = MessageAttachmentPart | MessageTextPart | MessageThinkingPart
 
 """Who wrote a message."""
 enum MessageRole {
@@ -848,6 +900,15 @@ type Mutation {
     input: CreatePersonaInput!
   ): Persona!
   """
+  Removes an upload no message carries yet (its file and its record). 404
+  `attachments.errors.not-found`; 409 `attachments.errors.in-use` once a
+  message carries it. Answers its id.
+  """
+  deleteAttachment(
+    """The attachment's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): ID!
+  """
   Soft-deletes one of the member's conversations; it can be restored for 30
   days, then it is purged with its messages and exports. 404
   `conversations.errors.not-found`; 409 `conversations.errors.run-in-progress`
@@ -904,6 +965,10 @@ type Mutation {
   `conversations.errors.not-editable` for an answer, plus `sendMessage`'s.
   """
   editMessage(
+    """
+    The attachments of the new message (at most 10), as `SendMessageInput.attachmentIds`; none are inherited from the edited message.
+    """
+    attachmentIds: [ID!] @constraint(maxItems: 10, maxLength: 64)
     """The message to edit."""
     messageId: ID! @constraint(maxLength: 64)
     """What the member says now."""
@@ -1111,7 +1176,8 @@ type Mutation {
   """
   Sends a message and starts the run that answers it. 404
   `conversations.errors.not-found`; 400 `validation.errors.invalid-input` with
-  `parentId` invalid (`conversations.errors.invalid-parent`); 409
+  `parentId` invalid (`conversations.errors.invalid-parent`) or an attachment id
+  that cannot be attached (`attachments.errors.not-attachable`); 409
   `conversations.errors.run-in-progress` while an answer is still being written
   in the conversation; 409 `conversations.errors.persona-unavailable` once the
   persona is someone else's PRIVATE one; 409 `models.errors.offline` or
@@ -1499,6 +1565,13 @@ Read operations. A signed-in viewer is needed unless a field says otherwise;
 an unauthenticated call is 401 `auth.errors.unauthenticated`.
 """
 type Query {
+  """
+  One of the member's attachments. 404 `attachments.errors.not-found` for another member's (the admin's too), an unknown one, or one whose conversation is deleted.
+  """
+  attachment(
+    """The attachment's id."""
+    id: ID! @constraint(maxLength: 64)
+  ): Attachment!
   """The team's budget settings. Administrators only."""
   budgetSettings: BudgetSettings!
   """
@@ -1708,6 +1781,13 @@ scalar SemVer @specifiedBy(url: "https://semver.org/spec/v2.0.0.html")
 
 """What to send in a conversation."""
 input SendMessageInput {
+  """
+  Attachments to send with the text (at most 10): each is the member's own
+  unlinked upload or one already in this conversation. All or nothing: any that
+  cannot be attached refuses the send with `attachments.errors.not-attachable`
+  on `attachmentIds.<i>`, and nothing is written.
+  """
+  attachmentIds: [ID!] @constraint(maxItems: 10, maxLength: 64)
   """The conversation to write in."""
   conversationId: ID! @constraint(maxLength: 64)
   """

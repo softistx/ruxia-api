@@ -5,6 +5,7 @@
 // collections here as it lands.
 
 export { roleLocks } from "../auth/roles.model";
+export { attachments } from "./attachments/attachments.model";
 export {
   budgetAlerts,
   budgetSettings,

@@ -10,12 +10,20 @@ import {
 } from "@softistx/ai-core";
 import type { StoredMessage } from "@softistx/ai-memory";
 import type { GraphQLError } from "graphql";
+import { estimateAttachment } from "../attachments/attachments.rules";
+import { isAttachment, standIn } from "../attachments/attachments.utils";
 import type { ModelDocument } from "../models";
 import type { MessageDocument, MessageUsage, StoredPart } from "./models";
 
 // The stored parts are the SDK's `Part`s, flat: the cast only widens a tool
 // error's `code` (a string here, the SDK's wire code there).
-const asParts = (parts: readonly StoredPart[]) => parts as unknown as Part[];
+// An attachment reference is not the SDK's: it reads as its name (the summary of
+// an older part of the conversation sees no file), and `expand` gives the
+// model the real parts when a call is made.
+const asParts = (parts: readonly StoredPart[]) =>
+  parts.map((part) =>
+    isAttachment(part) ? standIn(part) : part,
+  ) as unknown as Part[];
 
 // The text parts, joined: what a message says.
 export const joinedText = (parts: readonly StoredPart[]) =>
@@ -26,6 +34,13 @@ export const textMessage = (role: Message["role"], text: string): Message => ({
   role,
   parts: [{ type: "text", text }],
 });
+
+// What the attachments of these messages add to the context, estimated
+// (`estimateAttachment`): reserved from the compaction budget.
+export const attachmentTokens = (path: readonly MessageDocument[]) =>
+  path
+    .flatMap((message) => message.parts.filter(isAttachment))
+    .reduce((sum, part) => sum + estimateAttachment(part), 0);
 
 // The path root -> leaf as the model reads it. A message with no parts (a
 // stopped answer that wrote nothing) is left out: providers refuse it.
@@ -165,7 +180,16 @@ export function pageOfPath(
 // thinking's signature is never exposed).
 export type ShownPart =
   | { __typename: "MessageTextPart"; text: string }
-  | { __typename: "MessageThinkingPart"; text: string };
+  | { __typename: "MessageThinkingPart"; text: string }
+  | ({ __typename: "MessageAttachmentPart" } & ShownAttachment);
+
+type ShownAttachment = {
+  key: string;
+  kind: "IMAGE" | "PDF" | "TEXT";
+  name: string;
+  mime: string;
+  bytes: number;
+};
 
 export const shownParts = (parts: readonly StoredPart[]) =>
   parts.flatMap((part): ShownPart[] => {
@@ -176,6 +200,18 @@ export const shownParts = (parts: readonly StoredPart[]) =>
       return part.redacted === undefined
         ? [{ __typename: "MessageThinkingPart" as const, text: part.text }]
         : [];
+    }
+    if (isAttachment(part)) {
+      return [
+        {
+          __typename: "MessageAttachmentPart" as const,
+          key: part.key,
+          kind: part.kind.toUpperCase() as ShownAttachment["kind"],
+          name: part.name,
+          mime: part.mime,
+          bytes: part.bytes,
+        },
+      ];
     }
     return [];
   });

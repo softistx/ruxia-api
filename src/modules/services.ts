@@ -1,4 +1,5 @@
 import type { AgentObserver } from "@softistx/ai-core";
+import type { MediaBucket } from "@softistx/alxia-media";
 import DataLoader from "dataloader";
 import type { Auth } from "../auth/auth";
 import type { Viewer } from "../auth/viewer";
@@ -11,11 +12,11 @@ import {
   SignInService,
   StepUpService,
 } from "./accounts";
+import { AttachmentsService } from "./attachments";
 import { BudgetsService, noPush } from "./budgets";
 import {
   type ConversationsRuntime,
   conversationsServices,
-  type ExportBucket,
   type ModelAdapters,
   SpendService,
 } from "./conversations";
@@ -46,8 +47,8 @@ export function services(deps: {
   // Where the runs live (one per app) and what watches each of them.
   runtime: ConversationsRuntime;
   observers: readonly AgentObserver[];
-  // The private bucket (the exports of conversations).
-  media: ExportBucket;
+  // The private bucket (the exports and the attachments).
+  media: MediaBucket;
   now: () => Date;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
@@ -80,12 +81,14 @@ export function services(deps: {
     },
     deps.viewer,
   );
+  const attachments = new AttachmentsService(appMongo, deps.media, deps.viewer);
   const chat = conversationsServices({
     mongo: appMongo,
     viewer: deps.viewer,
     models: modelCatalogue,
     budgets,
     personas,
+    attachments,
     adapters: deps.adapters,
     titleModelId: deps.titleModelId,
     runtime: deps.runtime,
@@ -119,6 +122,7 @@ export function services(deps: {
     models: modelCatalogue,
     budgets,
     personas,
+    attachments,
     ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),

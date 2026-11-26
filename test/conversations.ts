@@ -17,8 +17,10 @@ export function fakeAdapters(script: Script = []): ModelAdapters & {
   };
 }
 
+import type { MediaBucket } from "@softistx/alxia-media";
 import { appMongo } from "../src/config/db";
 import { type Throttle, unthrottled } from "../src/limits/throttle";
+import { AttachmentsService } from "../src/modules/attachments";
 import { type AlertHook, BudgetsService, noPush } from "../src/modules/budgets";
 import {
   BranchesService,
@@ -67,7 +69,7 @@ type MemberOptions = {
   observers?: readonly AgentObserver[];
   warn?: (message: string) => void;
   // The bucket the exports go to (a memory one by default).
-  media?: ExportBucket;
+  media?: ExportBucket | MediaBucket;
   exports?: Throttle["exports"];
   // The Ollama probe's cached answer (none: Ollama is offline).
   statuses?: StatusStore;
@@ -92,7 +94,17 @@ function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
   );
   const now = options.now ?? (() => new Date());
   const messages = new MessagesService(appMongo, viewer, now);
-  const runMessages = new RunMessagesService(appMongo, viewer, now);
+  const attachments = new AttachmentsService(
+    appMongo,
+    { ...memoryBucket().bucket, ...options.media },
+    viewer,
+  );
+  const runMessages = new RunMessagesService(
+    appMongo,
+    viewer,
+    now,
+    attachments,
+  );
   const runtime = options.runtime ?? kit.runtime;
   const idle = new IdleService(runtime, runMessages);
   const conversations = new ConversationsService(
@@ -106,6 +118,7 @@ function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
   return {
     models,
     personas,
+    attachments,
     now,
     messages,
     runMessages,
@@ -158,6 +171,7 @@ function servicesOfMember(
     titles,
     models: core.models,
     personas: core.personas,
+    attachments: core.attachments,
     adapters,
     runtime: core.runtime,
     idle,
@@ -169,6 +183,7 @@ function servicesOfMember(
   };
   return {
     personas: core.personas,
+    attachments: core.attachments,
     budgets,
     conversations,
     messages,

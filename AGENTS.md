@@ -39,7 +39,7 @@ without a request viewer, writes only `budgetAlerts`, and mails the member throu
   memory or projects; no resolver or script exposes them (a leak spec guards it).
 - **AI through `@softistx/ai-*` only**: no provider SDK, no hand-made SSE writer, no
   app-side embeddings or search client. A gap is filed on softistx/ai and the slice waits.
-- **Transports**: `/graphql` is the entry point; `/media` (the private bucket's `persona-avatars` and `conversation-exports`) and
+- **Transports**: `/graphql` is the entry point; `/media` (the private bucket's `persona-avatars`, `attachments` and `conversation-exports`) and
   `GET /runs/:runId/events` (the SSE stream of a run, spec §1 and §4.5) are the transports
   beside it, through `@softistx/alxia-media` and `@softistx/ai-alxia`. Any other route is
   asked about first.

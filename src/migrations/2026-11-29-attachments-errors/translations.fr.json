@@ -1,0 +1,5 @@
+{
+  "attachments.errors.not-found": "Cette pièce jointe n'existe pas.",
+  "attachments.errors.not-attachable": "Ce fichier ne peut pas être envoyé avec le message : ce n'est pas un de vos envois, ou il appartient à une autre conversation.",
+  "attachments.errors.in-use": "Ce fichier a été envoyé dans un message. Il est supprimé avec sa conversation."
+}

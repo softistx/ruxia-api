@@ -5,7 +5,8 @@ import {
 } from "@softistx/alxia-media";
 import { withImageRendition } from "@softistx/alxia-media/image";
 import type { Viewer } from "../../auth/viewer";
-import { type Throttle, Throttled } from "../../limits/throttle";
+import type { Throttle } from "../../limits/throttle";
+import { uploadThrottle } from "../../limits/uploads";
 import type { AvatarsService } from "./services/avatars.service";
 
 // The name of the kind: the URL segment (`/media/persona-avatars/<key>/256`) the UI
@@ -42,16 +43,7 @@ export function avatarKind(ports: PersonaAvatarPorts) {
       viewer !== null && viewer.role !== null
         ? ports.avatars.mayRead(viewer.id, key)
         : false,
-    throttle: async ({ viewer }) => {
-      if (viewer === null) return true;
-      try {
-        await ports.throttle.uploads(viewer.id)();
-        return true;
-      } catch (error) {
-        if (error instanceof Throttled) return error.retryAfter;
-        throw error;
-      }
-    },
+    throttle: uploadThrottle(ports.throttle),
     // A picture is re-encoded into squares of 256 and 64 pixels and the upload
     // itself is never stored, so its EXIF and GPS data never reach the bucket
     // (`GET /media/persona-avatars/<key>` is a 404, the sizes are served).

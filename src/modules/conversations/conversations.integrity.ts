@@ -1,3 +1,4 @@
+import type { AttachmentsService } from "../attachments/services/attachments.service";
 import type { BudgetsService } from "../budgets/budgets.service";
 import type { ModelsService } from "../models";
 import type { PersonasService } from "../personas";
@@ -25,4 +26,12 @@ export type ConversationBudgets = Pick<
 export type ConversationPersonas = Pick<
   PersonasService,
   "find" | "findIncludingDeleted"
+>;
+
+// What the sends and the runs need of the attachments: the ids a send names
+// checked (`require`), linked to the message in its transaction (`link`), and
+// read for the model (`expand`). `AttachmentsService` implements it.
+export type ConversationAttachments = Pick<
+  AttachmentsService,
+  "require" | "link" | "expand"
 >;
