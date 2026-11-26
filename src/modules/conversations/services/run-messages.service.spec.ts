@@ -132,7 +132,7 @@ describe("RunMessagesService: an exchange", () => {
 });
 
 describe("RunMessagesService: release", () => {
-  test("frees a run that cannot end: FAILED FINALISE_FAILED, the conversation idle", async () => {
+  test("frees a run that cannot end: FAILED with the code given, the conversation idle", async () => {
     const ada = await memberOf(kit);
     const id = await started(ada);
     const conversation = await ada.conversations.find(id);
@@ -143,14 +143,18 @@ describe("RunMessagesService: release", () => {
       modelId: sonnet,
     });
     const runId = String(assistant._id);
-    expect(await ada.runMessages.release(runId, conversation._id)).toBe(true);
+    expect(
+      await ada.runMessages.release(runId, conversation._id, "INTERRUPTED"),
+    ).toBe(true);
     expect(await ada.runMessages.ofRun(runId)).toMatchObject({
       status: "failed",
-      errorCode: "FINALISE_FAILED",
+      errorCode: "INTERRUPTED",
     });
     expect((await ada.conversations.find(id)).activeRunId).toBeNull();
     // Nothing is held any more.
-    expect(await ada.runMessages.release(runId, conversation._id)).toBe(false);
+    expect(
+      await ada.runMessages.release(runId, conversation._id, "INTERRUPTED"),
+    ).toBe(false);
   });
 
   test("leaves a finished answer and another run's hold alone", async () => {
@@ -170,7 +174,11 @@ describe("RunMessagesService: release", () => {
       text: "again",
       modelId: sonnet,
     });
-    await ada.runMessages.release(String(assistant._id), conversation._id);
+    await ada.runMessages.release(
+      String(assistant._id),
+      conversation._id,
+      "INTERRUPTED",
+    );
     expect(await ada.runMessages.ofRun(String(assistant._id))).toMatchObject({
       status: "done",
     });

@@ -325,7 +325,7 @@ describe("RunsService: a run that cannot end or start", () => {
       await ada.runMessages.ofRun(String(lost.assistant._id)),
     ).toMatchObject({
       status: "failed",
-      errorCode: "FINALISE_FAILED",
+      errorCode: "INTERRUPTED",
     });
     expect(await ada.runMessages.ofRun(next.runId)).toMatchObject({
       status: "done",
@@ -379,6 +379,82 @@ describe("RunsService: a run that cannot end or start", () => {
       });
       expect(sent.conversation.activeRunId).toBeNull();
     }
+  });
+});
+
+// A send held inside `launch`, until `open()`: the summary of its context is
+// awaited by the test.
+function held(ada: Member) {
+  let open: () => void = () => {};
+  let reached: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const arrived = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  const messages = Object.assign(Object.create(ada.messages), {
+    context: async (...args: Parameters<typeof ada.messages.context>) => {
+      reached();
+      await gate;
+      return ada.messages.context(...args);
+    },
+  });
+  return { messages, open, arrived };
+}
+
+describe("RunsService: the claim", () => {
+  test("a second send while the first prepares its run is run-in-progress, and the first ends DONE", async () => {
+    const ada = await memberOf(kit, {
+      adapters: adaptersByModel({ [sonnet]: fakeModel([{ text: "Hi" }]) }),
+    });
+    const pause = held(ada);
+    const first = new RunsService(
+      { ...ada.deps, messages: pause.messages },
+      ada.viewer,
+    );
+    const id = await startedBy(ada);
+    const sending = first.send({ conversationId: id, text: "One" });
+    await pause.arrived;
+    await expect(
+      ada.runs.send({ conversationId: id, text: "Two" }),
+    ).rejects.toMatchObject(refused("conversations.errors.run-in-progress"));
+    pause.open();
+    const sent = await sending;
+    await ada.runtime.settled(sent.runId);
+    expect(await ada.runMessages.ofRun(sent.runId)).toMatchObject({
+      status: "done",
+      errorCode: null,
+    });
+    expect((await ada.conversations.find(id)).activeRunId).toBeNull();
+  });
+
+  test("a send refused by the shutdown is 503, and one caught by it ends INTERRUPTED", async () => {
+    const runtime = conversationsRuntime({ maxRunMs: 60_000 });
+    const ada = await memberOf(kit, {
+      runtime,
+      adapters: adaptersByModel({ [sonnet]: fakeModel([{ text: "Hi" }]) }),
+    });
+    const pause = held(ada);
+    const first = new RunsService(
+      { ...ada.deps, messages: pause.messages },
+      ada.viewer,
+    );
+    const id = await startedBy(ada);
+    const sending = first.send({ conversationId: id, text: "One" });
+    await pause.arrived;
+    const stopping = runtime.abortAll();
+    pause.open();
+    const sent = await sending;
+    await stopping;
+    expect(sent.reply).toMatchObject({
+      status: "failed",
+      errorCode: "INTERRUPTED",
+    });
+    expect(sent.conversation.activeRunId).toBeNull();
+    await expect(
+      ada.runs.send({ conversationId: id, text: "Two" }),
+    ).rejects.toMatchObject(refused("auth.errors.unavailable"));
   });
 });
 

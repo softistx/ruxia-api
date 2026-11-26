@@ -12,6 +12,17 @@ export const MAX_RUN_MS = 10 * 60_000;
 
 type Follow = Parameters<DetachedRuns["stream"]>[1];
 
+// A run was started while the server was going down.
+export class ShutdownError extends Error {
+  override name = "ShutdownError";
+  constructor() {
+    super("the server is shutting down");
+  }
+}
+
+// How long `abortAll` waits for the sends still preparing a run.
+const CLAIM_WAIT_MS = 3_000;
+
 // Where the answers are written while the clients come and go: ai-alxia's
 // detached runs over its in-memory log. There is one API process, so the runs
 // and their log live here (a restart interrupts them: `sweepRuns` ends the
@@ -27,10 +38,12 @@ export function conversationsRuntime(options: {
   // Runs a send has written and is still preparing (the context may take a
   // model call): held, though not started.
   const claimed = new Set<string>();
+  let stopping = false;
   return {
     // Begins writing `run`'s events to the log and returns at once; false when
     // the id is in use (the run is then dropped).
     async start(runId: string, run: RecordedRun, ownerId: string) {
+      if (stopping) throw new ShutdownError();
       const started = await runs.start(runId, run, { ownerId });
       if (started) {
         active.set(runId, run);
@@ -57,11 +70,20 @@ export function conversationsRuntime(options: {
     // finished run, whose log may still be readable, is not).
     running: (runId: string) => claimed.has(runId) || active.has(runId),
     // A send holds its run from its insert until `start` returns.
-    claim: (runId: string) => void claimed.add(runId),
+    // Refused (`ShutdownError`) once `abortAll` has begun.
+    claim(runId: string) {
+      if (stopping) throw new ShutdownError();
+      claimed.add(runId);
+    },
     unclaim: (runId: string) => void claimed.delete(runId),
     // The server is going down: aborts every run for `INTERRUPTED` (one a
     // member already stopped stays stopped) and waits for their answers.
     async abortAll() {
+      stopping = true;
+      // The sends still preparing a run finish (or fail on the refused start)
+      // first, so none is left holding a conversation.
+      const until = Date.now() + CLAIM_WAIT_MS;
+      while (claimed.size > 0 && Date.now() < until) await Bun.sleep(10);
       const running = [...active.values()];
       for (const run of running) run.abort(INTERRUPTED);
       await Promise.all(running.map((run) => run.settled));

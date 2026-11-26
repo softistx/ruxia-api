@@ -7,10 +7,12 @@ import {
   runAgent,
 } from "@softistx/ai-core";
 import { summarizeWith } from "@softistx/ai-memory";
+import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { SendMessageInput } from "../../../generated/graphql/resolvers";
 import type { Throttle } from "../../../limits/throttle";
 import type { Background } from "../../../shared/background";
+import { unavailable } from "../../../shared/errors";
 import type { ModelAdapters } from "../conversations.adapters";
 import {
   limitedSend,
@@ -24,7 +26,11 @@ import type {
 } from "../conversations.integrity";
 import { recorder } from "../conversations.recorder";
 import { finishOf, systemOf } from "../conversations.rules";
-import type { ConversationsRuntime } from "../conversations.runtime";
+import { FINALISE_FAILED, INTERRUPTED } from "../conversations.run-codes";
+import {
+  type ConversationsRuntime,
+  ShutdownError,
+} from "../conversations.runtime";
 import { isPersonaMissing, joinedText } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
 import type { ConversationsService } from "./conversations.service";
@@ -91,36 +97,52 @@ export class RunsService {
     );
     const model = await models.requireAvailable(conversation.modelId);
     const persona = await this.persona(conversation);
-    const { user, assistant } = await runMessages.insertExchange({
-      conversation,
-      parentId: parent?._id ?? null,
-      text: input.text,
-      modelId: conversation.modelId,
-    });
-    const exchange = {
-      conversation,
-      user,
-      assistant,
-      model,
-      first: parent === null && conversation.title === null,
-    };
-    const runId = String(assistant._id);
-    this.deps.runtime.claim(runId);
+    // The run is claimed before the exchange is written: from the insert on
+    // another send that reads this `activeRunId` must find it held, not stale.
+    const assistantId = new ObjectId();
+    const runId = String(assistantId);
+    this.claim(runId);
     try {
-      await this.launch(exchange, persona.personality);
-    } catch (error) {
-      // Nothing is running: the reply ends FAILED rather than STREAMING for
-      // ever, with the conversation released.
-      await this.end(exchange, undefined, [], undefined, error);
+      const { user, assistant } = await runMessages.insertExchange({
+        conversation,
+        parentId: parent?._id ?? null,
+        text: input.text,
+        modelId: conversation.modelId,
+        assistantId,
+      });
+      const exchange = {
+        conversation,
+        user,
+        assistant,
+        model,
+        first: parent === null && conversation.title === null,
+      };
+      try {
+        await this.launch(exchange, persona.personality);
+      } catch (error) {
+        // Nothing is running: the reply ends FAILED rather than STREAMING for
+        // ever, with the conversation released.
+        await this.end(exchange, undefined, [], undefined, error);
+      }
+      return {
+        runId,
+        userMessage: user,
+        reply: (await runMessages.ofRun(runId)) ?? assistant,
+        conversation: await conversations.find(input.conversationId),
+      };
     } finally {
       this.deps.runtime.unclaim(runId);
     }
-    return {
-      runId,
-      userMessage: user,
-      reply: (await runMessages.ofRun(runId)) ?? assistant,
-      conversation: await conversations.find(input.conversationId),
-    };
+  }
+
+  // Holds the run for this process; a server going down refuses it (503).
+  private claim(runId: string) {
+    try {
+      this.deps.runtime.claim(runId);
+    } catch (error) {
+      if (error instanceof ShutdownError) throw unavailable();
+      throw error;
+    }
   }
 
   // Stops the answer being written and returns its message, keeping what was
@@ -141,7 +163,8 @@ export class RunsService {
     const held = conversation.activeRunId;
     if (held === null) return;
     if (runtime.running(held)) throw runInProgress();
-    await runMessages.release(held, conversation._id);
+    // The likeliest cause is a crash the boot sweep did not see.
+    await runMessages.release(held, conversation._id, INTERRUPTED);
   }
 
   // The context folded to the model's window, the run over it, and the run
@@ -218,6 +241,7 @@ export class RunsService {
         warn,
       });
       if (error instanceof AiError) finish.errorCode = error.code;
+      if (error instanceof ShutdownError) finish.errorCode = INTERRUPTED;
       const ended = await runMessages.finalise(exchange.assistant, finish);
       if (ended && exchange.first && finish.status === "done") {
         const reply = joinedText(finish.parts);
@@ -233,7 +257,7 @@ export class RunsService {
         `run ${runId}: the answer could not be written: ${(failure as Error).name}`,
       );
       await runMessages
-        .release(runId, exchange.conversation._id)
+        .release(runId, exchange.conversation._id, FINALISE_FAILED)
         .catch(() => warn(`run ${runId}: the conversation could not be freed`));
     }
   }

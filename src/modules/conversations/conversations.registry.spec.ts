@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { adaptersByModel } from "~/ai";
 import { authApp } from "~/auth";
 import { memberOf } from "~/conversations";
-import { appMongo } from "../../../config/db";
-import { unthrottled } from "../../../limits/throttle";
-import { conversationsServices } from "./conversations-group.service";
+import { appMongo } from "../../config/db";
+import { unthrottled } from "../../limits/throttle";
+import { conversationsServices } from "./conversations.registry";
 
 test("builds the five conversations services, wired to the viewer", async () => {
   const kit = authApp();

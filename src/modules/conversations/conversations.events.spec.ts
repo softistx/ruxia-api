@@ -5,6 +5,7 @@ import { authApp } from "~/auth";
 import { memberOf, sonnet } from "~/conversations";
 import { framesOf, streamRun } from "~/runs";
 import { appMongo } from "../../config/db";
+import { conversationsRuntime } from "./conversations.runtime";
 
 beforeAll(async () => {
   await appMongo.db.conversations.raw.deleteMany({});
@@ -138,5 +139,24 @@ describe("GET /runs/:runId/events", () => {
     const unknown = await streamRun(kit, "nope", { token: ada.token });
     expect(unknown.status).toBe(404);
     await ada.runtime.settled(sent.runId);
+  });
+
+  test("a run whose log is gone between `has` and the stream is a 404", async () => {
+    const runtime = {
+      ...conversationsRuntime({ maxRunMs: 60_000 }),
+      has: async () => true,
+    };
+    const kit = authApp(undefined, { runtime });
+    const ada = await memberOf(kit);
+    const response = await streamRun(kit, "0123456789abcdef01234567", {
+      token: ada.token,
+    });
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as {
+      errors: { extensions: { code: string } }[];
+    };
+    expect(body.errors[0]?.extensions.code).toBe(
+      "conversations.errors.run-not-found",
+    );
   });
 });

@@ -78,4 +78,22 @@ describe("conversationsRuntime", () => {
     expect(reasons).toContain("INTERRUPTED");
     expect(reasons).toContain(undefined);
   });
+
+  test("a member's stop after the ceiling's abort keeps TIMEOUT", async () => {
+    const seen: unknown[] = [];
+    const slow = recorder(
+      runAgent({ model: stallingModel(), messages }),
+      async (_result, _events, reason) => {
+        // The write takes a while: the stop lands before it ends.
+        await Bun.sleep(100);
+        seen.push(reason);
+      },
+    );
+    const runtime = conversationsRuntime({ maxRunMs: 40 });
+    await runtime.start("t4", slow, "ada");
+    await Bun.sleep(70);
+    expect(runtime.cancel("t4", "ada")).toBe(true);
+    await runtime.settled("t4");
+    expect(seen).toEqual(["TIMEOUT"]);
+  });
 });

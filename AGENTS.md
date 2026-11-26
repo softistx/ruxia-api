@@ -28,5 +28,5 @@ the server runs (such as `models.probe.ts`) are the `reload` role under another 
   beside it, through `@softistx/alxia-media` and `@softistx/ai-alxia`. Any other route is
   asked about first.
 - **Writes by a model are proposed actions** confirmed by the user (MCP, memory).
-- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now`, `titleModelId`, `runtime` (the runs' host, one per app), `observers` (`aiTelemetry`, no content) and `heartbeatMs`; no module defaults a port.
+- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now`, `titleModelId`, `runtime` (the runs' host, one per app), `observers` (`aiTelemetry`, no content), `heartbeatMs` and `maxRunMs` (10 minutes); no module defaults a port.
 - **CI**: no workflow yet; the local green bar is the proof until one is added.

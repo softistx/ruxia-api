@@ -95,7 +95,13 @@ async function* resumed<T>(
   first: IteratorResult<T, void>,
   rest: AsyncGenerator<T, void, undefined>,
 ) {
-  if (first.done) return;
-  yield first.value;
-  yield* rest;
+  try {
+    if (first.done) return;
+    yield first.value;
+    yield* rest;
+  } finally {
+    // Closed whether the client left or the stream ended: the follower of the
+    // log is released.
+    await rest.return(undefined);
+  }
 }

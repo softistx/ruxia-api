@@ -3,6 +3,7 @@ export * from "./conversations.errors";
 export * from "./conversations.events";
 export * from "./conversations.integrity";
 export * from "./conversations.recorder";
+export * from "./conversations.registry";
 export * from "./conversations.rules";
 export * from "./conversations.run-codes";
 export * from "./conversations.runtime";

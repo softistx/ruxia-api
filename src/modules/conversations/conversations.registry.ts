@@ -1,19 +1,19 @@
 import type { AgentObserver } from "@softistx/ai-core";
-import type { Viewer } from "../../../auth/viewer";
-import type { AppMongo } from "../../../config/db";
-import type { Throttle } from "../../../limits/throttle";
-import type { Background } from "../../../shared/background";
-import type { ModelAdapters } from "../conversations.adapters";
+import type { Viewer } from "../../auth/viewer";
+import type { AppMongo } from "../../config/db";
+import type { Throttle } from "../../limits/throttle";
+import type { Background } from "../../shared/background";
+import type { ModelAdapters } from "./conversations.adapters";
 import type {
   ConversationModels,
   ConversationPersonas,
-} from "../conversations.integrity";
-import type { ConversationsRuntime } from "../conversations.runtime";
-import { ConversationsService } from "./conversations.service";
-import { MessagesService } from "./messages.service";
-import { RunMessagesService } from "./run-messages.service";
-import { RunsService } from "./runs.service";
-import { TitlesService } from "./titles.service";
+} from "./conversations.integrity";
+import type { ConversationsRuntime } from "./conversations.runtime";
+import { ConversationsService } from "./services/conversations.service";
+import { MessagesService } from "./services/messages.service";
+import { RunMessagesService } from "./services/run-messages.service";
+import { RunsService } from "./services/runs.service";
+import { TitlesService } from "./services/titles.service";
 
 // The conversations' services for one request, wired to each other and to the
 // ports the registry hands in (never defaulted). `warn` names its source.
