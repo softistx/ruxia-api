@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { AiError } from "@softistx/ai-core";
 import { fakeModel } from "@softistx/ai-testing";
-import { adaptersByModel, stallingModel } from "~/ai";
+import { adaptersByModel, gatedModel, stallingModel } from "~/ai";
 import { authApp } from "~/auth";
 import { memberOf, sonnet } from "~/conversations";
 import { appMongo } from "../../../config/db";
@@ -75,9 +75,10 @@ async function ask(ada: Member, conversationId: string, text: string) {
 describe("RunsService: a send", () => {
   test("writes both messages, runs, and ends DONE with usage and cost", async () => {
     const model = fakeModel([{ text: "Hello Ada", usage }]);
+    const gate = gatedModel(model);
     const ada = await memberOf(kit, {
       adapters: adaptersByModel({
-        [sonnet]: model,
+        [sonnet]: gate.model,
         [opus]: fakeModel([{ object: { title: "Greetings" } }]),
         [haiku]: model,
       }),
@@ -88,6 +89,7 @@ describe("RunsService: a send", () => {
     expect(sent.runId).toBe(String(sent.reply._id));
     expect(sent.conversation.activeRunId).toBe(sent.runId);
     expect(sent.userMessage.parts).toEqual([{ type: "text", text: "Hi" }]);
+    gate.release();
     await ada.runtime.settled(sent.runId);
     const answer = await ada.runMessages.ofRun(sent.runId);
     expect(answer).toMatchObject({
