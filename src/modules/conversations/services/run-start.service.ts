@@ -9,9 +9,11 @@ import type { Viewer } from "../../../auth/viewer";
 import type { Throttle } from "../../../limits/throttle";
 import type { Background } from "../../../shared/background";
 import { unavailable } from "../../../shared/errors";
+import { type AttachmentPart, readerOf } from "../../attachments";
 import type { ModelAdapters } from "../conversations.adapters";
 import { limitedSend, personaUnavailable } from "../conversations.errors";
 import type {
+  ConversationAttachments,
   ConversationBudgets,
   ConversationModels,
   ConversationPersonas,
@@ -44,6 +46,7 @@ export interface RunStartDeps {
   budgets: ConversationBudgets;
   personas: ConversationPersonas;
   adapters: ModelAdapters;
+  attachments: Pick<ConversationAttachments, "expand">;
   runtime: ConversationsRuntime;
   idle: Pick<IdleService, "require">;
   observers: readonly AgentObserver[];
@@ -56,7 +59,11 @@ export interface RunStartDeps {
 // What a send or a regenerate writes: the member's text under a parent, or the
 // member's message that already exists.
 export type Write =
-  | { parentId: ObjectId | null; text: string }
+  | {
+      parentId: ObjectId | null;
+      text: string;
+      attachments?: readonly AttachmentPart[];
+    }
   | { user: MessageDocument };
 
 // The start path of a run, for one request: the checks, the claim, the
@@ -159,7 +166,8 @@ export class RunStartService {
   // The context folded to the model's window, the run over it, and the run
   // handed to the runtime under the viewer's id.
   private async launch(exchange: Started, personality: string) {
-    const { messages, adapters, runtime, observers, now } = this.deps;
+    const { messages, adapters, attachments, runtime, observers, now } =
+      this.deps;
     const { conversation, user, assistant, model } = exchange;
     const adapter = adapters.adapterFor(model);
     const path = await messages.path(conversation, user._id);
@@ -172,6 +180,7 @@ export class RunStartService {
       window: model.contextWindow,
       systemTokens: estimateTokens(base.map((block) => block.text).join("\n")),
       summarize: summarizeWith(adapter),
+      expand: (lists) => attachments.expand(lists, readerOf(model)),
     });
     const run = runAgent({
       model: adapter,

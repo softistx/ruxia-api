@@ -1,0 +1,71 @@
+"What kind of file an attachment is."
+enum AttachmentKind {
+  "A JPEG, PNG, WebP or GIF picture (10 MB at most)."
+  IMAGE
+  "A PDF (20 MB at most)."
+  PDF
+  "A plain text, Markdown, CSV or JSON file, valid UTF-8 (20 MB at most)."
+  TEXT
+}
+
+"""
+A file the member uploaded to send with a message (spec 4.6): `PUT /media/attachments`
+with the file as the body and its name in `x-file-name` answers `{ id, key, contentType,
+size, kind, name }`; the file is read at `GET /media/attachments/<key>`, by its owner
+alone, while its conversation is live. Only its owner reads one: another member
+gets `attachments.errors.not-found`, and so does the admin. Never a URL.
+"""
+type Attachment {
+  "The id `sendMessage` takes in `attachmentIds`."
+  id: ID!
+  "The media key of the file (never a URL)."
+  key: String!
+  "What kind of file it is."
+  kind: AttachmentKind!
+  "The name the file was uploaded with."
+  name: String!
+  "The content type the server checked."
+  mime: String!
+  "Its size in bytes."
+  bytes: Int!
+  "The conversation it was sent in; null until a message carries it."
+  conversationId: ID
+  "The message that first carried it; null until then."
+  messageId: ID
+  "When it was uploaded."
+  createdAt: DateTime!
+}
+
+"An attachment as a message holds it: its key, never its file or a URL."
+type MessageAttachmentPart {
+  "The media key of the file."
+  key: String!
+  "What kind of file it is."
+  kind: AttachmentKind!
+  "The name of the file."
+  name: String!
+  "The content type."
+  mime: String!
+  "Its size in bytes."
+  bytes: Int!
+}
+
+extend type Query {
+  "One of the member's attachments. 404 `attachments.errors.not-found` for another member's (the admin's too), an unknown one, or one whose conversation is deleted."
+  attachment(
+    "The attachment's id."
+    id: ID! @constraint(maxLength: 64)
+  ): Attachment!
+}
+
+extend type Mutation {
+  """
+  Removes an upload no message carries yet (its file and its record). 404
+  `attachments.errors.not-found`; 409 `attachments.errors.in-use` once a
+  message carries it. Answers its id.
+  """
+  deleteAttachment(
+    "The attachment's id."
+    id: ID! @constraint(maxLength: 64)
+  ): ID!
+}

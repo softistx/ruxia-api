@@ -16,6 +16,7 @@ test("builds the nine conversations services, wired to the viewer", async () => 
     models: ada.deps.models,
     budgets: ada.budgets,
     personas: ada.deps.personas,
+    attachments: ada.attachments,
     adapters: adaptersByModel({}),
     titleModelId: "claude-haiku-5-5",
     runtime: kit.runtime,

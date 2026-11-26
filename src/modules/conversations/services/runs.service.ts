@@ -7,6 +7,7 @@ import {
   notRegenerable,
   runNotFound,
 } from "../conversations.errors";
+import type { ConversationAttachments } from "../conversations.integrity";
 import type { MessageDocument } from "../models";
 import type { MessagesService } from "./messages.service";
 import { type RunStartDeps, RunStartService } from "./run-start.service";
@@ -14,6 +15,7 @@ import { type RunStartDeps, RunStartService } from "./run-start.service";
 // What the runs need: the start path's, and the reads a send makes first.
 export type RunsDeps = RunStartDeps & {
   messages: Pick<MessagesService, "requireParent" | "find">;
+  attachments: Pick<ConversationAttachments, "require" | "expand">;
 };
 
 // The sends and stops of a member's runs, for one request: the resolver ran
@@ -50,16 +52,28 @@ export class RunsService {
             )
           )?._id ?? null)
         : parent.id;
-    return this.start.exchange(conversation, { parentId, text: input.text });
+    const attachments = await this.deps.attachments.require(
+      input.attachmentIds ?? [],
+      conversation._id,
+    );
+    return this.start.exchange(conversation, {
+      parentId,
+      text: input.text,
+      attachments,
+    });
   }
 
   // Edits a message of the member's: a sibling message under the same parent
   // and a new reply, through the send (so its limit, its checks and its claim).
-  async edit(messageId: string, text: string) {
+  async edit(messageId: string, text: string, attachmentIds?: string[] | null) {
     const message = await this.deps.messages.find(messageId);
     if (message.role !== "user") throw notEditable();
     return this.send(
-      { conversationId: String(message.conversationId), text },
+      {
+        conversationId: String(message.conversationId),
+        text,
+        attachmentIds: attachmentIds ?? [],
+      },
       { id: message.parentId },
     );
   }

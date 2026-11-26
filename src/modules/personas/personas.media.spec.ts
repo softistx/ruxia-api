@@ -140,6 +140,15 @@ describe("the persona avatars over /media", () => {
           },
         },
         exports: { mayRead: async () => false },
+        attachments: {
+          mayRead: async () => false,
+          count: async () => 0,
+          record: async () => {
+            throw new Error("db down");
+          },
+          forget: async () => {},
+        },
+        warn: () => {},
         throttle: unthrottled,
       },
       bucket,

@@ -245,7 +245,12 @@ describe("MessagesService: the context", () => {
     const left = await exchange(ada, id, first.assistant._id, "left");
     const right = await exchange(ada, id, first.assistant._id, "right");
     const conversation = await ada.conversations.find(id);
-    const options = { window: 200_000, systemTokens: 0, summarize };
+    const options = {
+      window: 200_000,
+      systemTokens: 0,
+      summarize,
+      expand: async () => [],
+    };
     for (const leaf of [left, right]) {
       const path = await ada.messages.path(conversation, leaf.assistant._id);
       const context = await ada.messages.context(path, options);
@@ -276,6 +281,7 @@ describe("MessagesService: the context", () => {
       window: 8_192,
       systemTokens: 0,
       summarize,
+      expand: async () => [],
     });
     expect(context.summary).toBe("folded");
     expect(context.messages.length).toBeLessThan(12);

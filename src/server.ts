@@ -7,6 +7,7 @@ import { env } from "./config/env";
 import { serverMedia } from "./config/media";
 import { redis, serverStatuses } from "./config/redis";
 import { MigrationsOutOfSyncError } from "./migrations/status";
+import { AttachmentsPurge } from "./modules/attachments";
 import {
   ConversationsPurge,
   PURGE_BATCH,
@@ -92,6 +93,9 @@ if (env.OLLAMA_BASE_URL === undefined) {
 const purge = new ConversationsPurge({
   mongo: appMongo,
   media: serverMedia,
+  attachments: new AttachmentsPurge(appMongo, serverMedia, (message) =>
+    console.warn(message),
+  ),
   ticker: intervalTicker,
   now: () => new Date(),
   intervalMs: PURGE_INTERVAL_MS,

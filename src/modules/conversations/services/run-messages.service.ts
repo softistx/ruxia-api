@@ -4,6 +4,8 @@ import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import { exhausted } from "../../../shared/errors";
 import { retryWriteConflicts } from "../../../shared/retry";
+import type { Tx } from "../../../shared/tx";
+import type { AttachmentPart, AttachmentsService } from "../../attachments";
 import { runInProgress } from "../conversations.errors";
 import {
   endMessage,
@@ -38,12 +40,15 @@ export type Exchange = {
   // The run's id, made by the send before it claims the run; made here when
   // left out.
   assistantId?: ObjectId;
-} & ({ parentId: ObjectId | null; text: string } | { user: MessageDocument });
-
-// The transaction a write runs in.
-type Tx = Parameters<
-  Parameters<ReturnType<AppMongo["as"]>["transaction"]>[0]
->[0];
+} & (
+  | {
+      parentId: ObjectId | null;
+      text: string;
+      // The member's files, checked by `AttachmentsService.require`.
+      attachments?: readonly AttachmentPart[];
+    }
+  | { user: MessageDocument }
+);
 
 // The messages a run writes, for one request: the exchange a send inserts,
 // the end a run gives its answer, and the release of a run that cannot end.
@@ -53,6 +58,7 @@ export class RunMessagesService {
     private readonly mongo: Pick<AppMongo, "as" | "db">,
     private readonly viewer: Viewer | null,
     private readonly now: () => Date,
+    private readonly attachments: Pick<AttachmentsService, "link">,
   ) {}
 
   private get actor() {
@@ -185,6 +191,29 @@ export class RunMessagesService {
     return ended.matchedCount + free.matchedCount > 0;
   }
 
+  // The member's message, its files linked to it in the same transaction.
+  private async createUser(
+    tx: Tx,
+    input: Exclude<Exchange, { user: MessageDocument }>,
+    conversationId: ObjectId,
+    at: Date,
+  ) {
+    const files = input.attachments ?? [];
+    const user = await tx.db.messages.create({
+      _id: new ObjectId(),
+      ownerId: this.actor,
+      conversationId,
+      parentId: input.parentId,
+      role: "user",
+      parts: [{ type: "text", text: input.text }, ...files],
+      searchText: input.text,
+      status: "done",
+      createdAt: at,
+    });
+    await this.attachments.link(tx, files, conversationId, user._id);
+    return user;
+  }
+
   private async createPair(
     tx: Tx,
     input: Exchange,
@@ -195,17 +224,7 @@ export class RunMessagesService {
     const user =
       "user" in input
         ? input.user
-        : await tx.db.messages.create({
-            _id: new ObjectId(),
-            ownerId: this.actor,
-            conversationId: conversation._id,
-            parentId: input.parentId,
-            role: "user",
-            parts: [{ type: "text", text: input.text }],
-            searchText: input.text,
-            status: "done",
-            createdAt: at,
-          });
+        : await this.createUser(tx, input, conversation._id, at);
     const assistant = await tx.db.messages.create({
       _id: assistantId,
       ownerId: this.actor,

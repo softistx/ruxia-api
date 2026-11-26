@@ -18,6 +18,7 @@ import { clientHeader } from "./http/csrf";
 import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
+import { AttachmentFiles } from "./modules/attachments";
 import {
   ExportFiles,
   type ModelAdapters,
@@ -168,6 +169,8 @@ function filesOf(throttle: Throttle, media: MediaBucket) {
     {
       avatars: new AvatarsService(appMongo),
       exports: new ExportFiles(appMongo),
+      attachments: new AttachmentFiles(appMongo),
+      warn: (message) => console.warn(message),
       throttle,
     },
     media,

@@ -1,4 +1,5 @@
 import type { AgentObserver } from "@softistx/ai-core";
+import type { MediaBucket } from "@softistx/alxia-media";
 import DataLoader from "dataloader";
 import type { Auth } from "../auth/auth";
 import type { Viewer } from "../auth/viewer";
@@ -11,11 +12,11 @@ import {
   SignInService,
   StepUpService,
 } from "./accounts";
+import { AttachmentsService } from "./attachments";
 import { BudgetsService, noPush } from "./budgets";
 import {
   type ConversationsRuntime,
   conversationsServices,
-  type ExportBucket,
   type ModelAdapters,
   SpendService,
 } from "./conversations";
@@ -31,10 +32,8 @@ const statusWarning = oncePerMinute(
   () => Date.now(),
 );
 
-// What a request builds anew, so none is shared between requests: the
-// services over janus, with the request's own limit (bound to its client
-// address). Modules join with their slices.
-export function services(deps: {
+// What a request is built from.
+export type ServiceDeps = {
   auth: Auth;
   request: Request;
   viewer: Viewer | null;
@@ -46,10 +45,15 @@ export function services(deps: {
   // Where the runs live (one per app) and what watches each of them.
   runtime: ConversationsRuntime;
   observers: readonly AgentObserver[];
-  // The private bucket (the exports of conversations).
-  media: ExportBucket;
+  // The private bucket (the exports and the attachments).
+  media: MediaBucket;
   now: () => Date;
-}) {
+};
+
+// What a request builds anew, so none is shared between requests: the
+// services over janus, with the request's own limit (bound to its client
+// address). Modules join with their slices.
+export function services(deps: ServiceDeps) {
   const limit = deps.throttle.client(deps.clientIp);
   const members = new MembersService(appMongo, deps.auth, deps.viewer);
   const owners = new DataLoader((ids: readonly string[]) =>
@@ -80,23 +84,7 @@ export function services(deps: {
     },
     deps.viewer,
   );
-  const chat = conversationsServices({
-    mongo: appMongo,
-    viewer: deps.viewer,
-    models: modelCatalogue,
-    budgets,
-    personas,
-    adapters: deps.adapters,
-    titleModelId: deps.titleModelId,
-    runtime: deps.runtime,
-    observers: deps.observers,
-    background: deps.auth.background,
-    sends: deps.throttle.sends,
-    media: deps.media,
-    exports: deps.throttle.exports,
-    warn: statusWarning,
-    now: deps.now,
-  });
+  const chat = chatSide(deps, modelCatalogue, budgets, personas);
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
     passkeys: new PasskeysService(deps.auth, deps.request, deps.viewer, limit),
@@ -124,6 +112,41 @@ export function services(deps: {
       i18n.language(),
     ),
   };
+}
+
+// The attachments and the conversations, which share them: the runs read the
+// files and link them to the messages they write.
+function chatSide(
+  deps: ServiceDeps,
+  models: ModelsService,
+  budgets: BudgetsService,
+  personas: PersonasService,
+) {
+  const attachments = new AttachmentsService(
+    appMongo,
+    deps.media,
+    deps.viewer,
+    (message) => statusWarning("attachments", message),
+  );
+  const chat = conversationsServices({
+    mongo: appMongo,
+    viewer: deps.viewer,
+    models,
+    budgets,
+    personas,
+    attachments,
+    adapters: deps.adapters,
+    titleModelId: deps.titleModelId,
+    runtime: deps.runtime,
+    observers: deps.observers,
+    background: deps.auth.background,
+    sends: deps.throttle.sends,
+    media: deps.media,
+    exports: deps.throttle.exports,
+    warn: statusWarning,
+    now: deps.now,
+  });
+  return { attachments, ...chat };
 }
 
 export type Services = ReturnType<typeof services>;

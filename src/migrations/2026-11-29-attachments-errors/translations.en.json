@@ -1,0 +1,5 @@
+{
+  "attachments.errors.not-found": "This attachment does not exist.",
+  "attachments.errors.not-attachable": "This file cannot be sent with the message: it is not one of your uploads, or it belongs to another conversation.",
+  "attachments.errors.in-use": "This file was sent in a message. It is removed with its conversation."
+}

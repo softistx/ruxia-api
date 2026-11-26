@@ -10,6 +10,13 @@ input SendMessageInput {
   parentId: ID @constraint(maxLength: 64)
   "What the member says."
   text: String! @constraint(minLength: 1, maxLength: 20000)
+  """
+  Attachments to send with the text (at most 10): each is the member's own
+  unlinked upload or one already in this conversation. All or nothing: any that
+  cannot be attached refuses the send with `attachments.errors.not-attachable`
+  on `attachmentIds.<i>`, and nothing is written.
+  """
+  attachmentIds: [ID!] @constraint(maxItems: 10, maxLength: 64)
 }
 
 """
@@ -31,7 +38,8 @@ extend type Mutation {
   """
   Sends a message and starts the run that answers it. 404
   `conversations.errors.not-found`; 400 `validation.errors.invalid-input` with
-  `parentId` invalid (`conversations.errors.invalid-parent`); 409
+  `parentId` invalid (`conversations.errors.invalid-parent`) or an attachment id
+  that cannot be attached (`attachments.errors.not-attachable`); 409
   `conversations.errors.run-in-progress` while an answer is still being written
   in the conversation; 409 `conversations.errors.persona-unavailable` once the
   persona is someone else's PRIVATE one; 409 `models.errors.offline` or
@@ -66,6 +74,8 @@ extend type Mutation {
     messageId: ID! @constraint(maxLength: 64)
     "What the member says now."
     text: String! @constraint(minLength: 1, maxLength: 20000)
+    "The attachments of the new message (at most 10), as `SendMessageInput.attachmentIds`; none are inherited from the edited message."
+    attachmentIds: [ID!] @constraint(maxItems: 10, maxLength: 64)
   ): SendMessagePayload!
 
   """
