@@ -15,9 +15,11 @@ export {
   conversationExports,
   conversations,
   messages,
+  proposedActions,
   spend,
 } from "./conversations/models";
 export { members } from "./members/members.model";
+export { memoryItems } from "./memory/memory.model";
 export { models } from "./models/models.model";
 export { personaAvatars, personas } from "./personas/models";
 export { translations } from "./translations/translations.model";

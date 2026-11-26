@@ -7,6 +7,7 @@ import {
   type Usage,
 } from "@softistx/ai-core";
 import { ObjectId } from "mongodb";
+import { shownParts } from "./conversations.shown.utils";
 import {
   attachmentTokens,
   contextOf,
@@ -16,7 +17,6 @@ import {
   pageOfPath,
   partialParts,
   partsOf,
-  shownParts,
   textMessage,
   toModelMessages,
   toStored,
@@ -67,8 +67,10 @@ describe("parts", () => {
       { role: "tool", parts: parts.slice(3) as never },
     ];
     expect(partsOf(run)).toEqual(parts);
+    // The model reads the thinking and the text again, never the stored tool
+    // parts (flat on one message, a provider's history refuses them).
     expect(toModelMessages([message("assistant", parts)])).toEqual([
-      { role: "assistant", parts: parts as never },
+      { role: "assistant", parts: parts.slice(0, 2) as never },
     ]);
   });
 
@@ -93,12 +95,15 @@ describe("parts", () => {
 
   test("thinking signatures and redacted blocks are never shown", () => {
     expect(
-      shownParts([
-        { type: "thinking", text: "why", signature: "secret" },
-        { type: "thinking", text: "", redacted: "blob" },
-        text("answer"),
-        { type: "tool-call", id: "c", name: "t", input: {} },
-      ]),
+      shownParts(
+        [
+          { type: "thinking", text: "why", signature: "secret" },
+          { type: "thinking", text: "", redacted: "blob" },
+          text("answer"),
+          { type: "tool-call", id: "c", name: "t", input: {} },
+        ],
+        new Map(),
+      ),
     ).toEqual([
       { __typename: "MessageThinkingPart", text: "why" },
       { __typename: "MessageTextPart", text: "answer" },
@@ -255,7 +260,7 @@ describe("attachments in messages", () => {
     bytes: 10,
   };
   test("a reference is shown by key, kind, name, mime and size, never a URL", () => {
-    expect(shownParts([{ type: "text", text: "Hi" }, ref])).toEqual([
+    expect(shownParts([{ type: "text", text: "Hi" }, ref], new Map())).toEqual([
       { __typename: "MessageTextPart", text: "Hi" },
       {
         __typename: "MessageAttachmentPart",

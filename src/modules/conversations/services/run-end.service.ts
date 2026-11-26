@@ -1,5 +1,7 @@
 import { type AgentEvent, type AgentResult, AiError } from "@softistx/ai-core";
+import { ObjectId } from "mongodb";
 import type { Background } from "../../../shared/background";
+import { proposalsIn } from "../conversations.actions.utils";
 import type {
   ConversationBudgets,
   ConversationModels,
@@ -9,6 +11,7 @@ import { FINALISE_FAILED, INTERRUPTED } from "../conversations.run-codes";
 import { ShutdownError } from "../conversations.runtime";
 import { joinedText } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
+import type { ActionsService } from "./actions.service";
 import type { RunMessagesService } from "./run-messages.service";
 import type { TitlesService } from "./titles.service";
 
@@ -28,6 +31,7 @@ export interface Started {
 export interface RunEndDeps {
   runMessages: Pick<RunMessagesService, "finalise" | "release">;
   titles: Pick<TitlesService, "name">;
+  actions: Pick<ActionsService, "record">;
   budgets: Pick<ConversationBudgets, "checkAlert">;
   background: Background;
   warn: (message: string) => void;
@@ -51,7 +55,8 @@ export class RunEndService {
     abortReason: unknown,
     error?: unknown,
   ) {
-    const { runMessages, titles, budgets, background, warn } = this.deps;
+    const { runMessages, titles, actions, budgets, background, warn } =
+      this.deps;
     const runId = String(exchange.assistant._id);
     try {
       const finish = finishOf({
@@ -63,7 +68,15 @@ export class RunEndService {
       });
       if (error instanceof AiError) finish.errorCode = error.code;
       if (error instanceof ShutdownError) finish.errorCode = INTERRUPTED;
+      // The actions the model proposed take an id of the store's own; they are
+      // stored once the message has ended (a stop that won leaves none).
+      const { parts, proposed } = proposalsIn(
+        finish.parts,
+        () => new ObjectId(),
+      );
+      finish.parts = parts;
       const ended = await runMessages.finalise(exchange.assistant, finish);
+      if (ended) await actions.record(exchange.assistant, proposed);
       // The cost is written: the member's 80 % alert is checked in the
       // background, so it never slows or fails the run's end. A free reply
       // (cost 0) or one of unknown price (null) cannot raise it.

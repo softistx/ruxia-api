@@ -19,10 +19,20 @@ import type { MessageDocument, MessageUsage, StoredPart } from "./models";
 // An attachment reference is not the SDK's: it reads as its name (the summary of
 // an older part of the conversation sees no file), and `expand` gives the
 // model the real parts when a call is made.
+// Tool calls, tool results and proposed actions stay out of what the model
+// reads again: a message stores them flat, which a provider's history refuses,
+// and what a confirmed action did lives in the memory the system prompt carries.
+const isToolPart = (part: StoredPart) =>
+  part.type === "tool-call" ||
+  part.type === "tool-result" ||
+  part.type === "proposed-action";
+
 const asParts = (parts: readonly StoredPart[]) =>
-  parts.map((part) =>
-    isAttachment(part) ? standIn(part) : part,
-  ) as unknown as Part[];
+  parts
+    .filter((part) => !isToolPart(part))
+    .map((part) =>
+      isAttachment(part) ? standIn(part) : part,
+    ) as unknown as Part[];
 
 // The text parts, joined: what a message says.
 export const joinedText = (parts: readonly StoredPart[]) =>
@@ -174,52 +184,6 @@ export function pageOfPath(
     nextCursor: more && last ? cursorOf(String(last._id)) : null,
   };
 }
-
-// The parts a client may see: text and thinking, tagged for the union (the
-// thinking's signature is never exposed).
-export type ShownPart =
-  | { __typename: "MessageTextPart"; text: string }
-  | { __typename: "MessageThinkingPart"; text: string }
-  | ({ __typename: "MessageAttachmentPart" } & ShownAttachment);
-
-type ShownAttachment = {
-  key: string;
-  kind: "IMAGE" | "PDF" | "TEXT";
-  name: string;
-  mime: string;
-  bytes: number;
-};
-
-export const shownParts = (parts: readonly StoredPart[]) =>
-  parts.flatMap((part): ShownPart[] => {
-    if (part.type === "text") {
-      return [{ __typename: "MessageTextPart" as const, text: part.text }];
-    }
-    if (part.type === "thinking") {
-      return part.redacted === undefined
-        ? [{ __typename: "MessageThinkingPart" as const, text: part.text }]
-        : [];
-    }
-    if (isAttachment(part)) {
-      return [
-        {
-          __typename: "MessageAttachmentPart" as const,
-          key: part.key,
-          kind: part.kind.toUpperCase() as ShownAttachment["kind"],
-          name: part.name,
-          mime: part.mime,
-          bytes: part.bytes,
-        },
-      ];
-    }
-    return [];
-  });
-
-export const shownRole = (role: MessageDocument["role"]) =>
-  role === "user" ? ("USER" as const) : ("ASSISTANT" as const);
-
-export const shownStatus = (status: MessageDocument["status"]) =>
-  status.toUpperCase() as "STREAMING" | "DONE" | "FAILED" | "STOPPED";
 
 // Whether a refusal says the persona is not readable (not found).
 export const isPersonaMissing = (error: unknown) =>

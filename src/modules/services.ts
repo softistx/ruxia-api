@@ -22,6 +22,7 @@ import {
 } from "./conversations";
 import { InvitationsService } from "./invitations";
 import { MembersService, memberRenamer } from "./members";
+import { MemoryService, memoryActionTools } from "./memory";
 import { ModelsService, oncePerMinute, type StatusStore } from "./models";
 import { AvatarsService, PersonasService } from "./personas";
 import { loadedCatalogues, TranslationsService } from "./translations";
@@ -84,7 +85,8 @@ export function services(deps: ServiceDeps) {
     },
     deps.viewer,
   );
-  const chat = chatSide(deps, modelCatalogue, budgets, personas);
+  const memory = new MemoryService(appMongo, personas, members, deps.viewer);
+  const chat = chatSide(deps, modelCatalogue, budgets, personas, memory);
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
     passkeys: new PasskeysService(deps.auth, deps.request, deps.viewer, limit),
@@ -107,6 +109,7 @@ export function services(deps: ServiceDeps) {
     models: modelCatalogue,
     budgets,
     personas,
+    memory,
     ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
@@ -121,6 +124,7 @@ function chatSide(
   models: ModelsService,
   budgets: BudgetsService,
   personas: PersonasService,
+  memory: MemoryService,
 ) {
   const attachments = new AttachmentsService(
     appMongo,
@@ -135,6 +139,8 @@ function chatSide(
     budgets,
     personas,
     attachments,
+    memory,
+    actionTools: memoryActionTools(memory, personas),
     adapters: deps.adapters,
     titleModelId: deps.titleModelId,
     runtime: deps.runtime,

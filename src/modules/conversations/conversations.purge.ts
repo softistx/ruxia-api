@@ -32,7 +32,7 @@ export interface PurgePorts {
 }
 
 // Hard-deletes the conversations soft-deleted more than 30 days ago, with
-// their messages, exports and attachments (the files and their records), and
+// their messages, proposed actions, exports and attachments (the files and their records), and
 // the uploads no message carried within 24 hours. Started daily from
 // src/server.ts only, never in tests, which call `tick` themselves. It is a
 // system job: it reads and deletes across owners (raw, no viewer), and exposes
@@ -154,6 +154,7 @@ export class ConversationsPurge {
       }
       await exports.deleteMany({ conversationId });
       await attachments.ofConversation(conversationId);
+      await mongo.db.proposedActions.raw.deleteMany({ conversationId });
       await mongo.db.messages.raw.deleteMany({ conversationId });
       await mongo.db.conversations.raw.deleteOne({
         _id: conversationId,

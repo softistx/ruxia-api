@@ -1,0 +1,82 @@
+"Where a proposed action stands."
+enum ProposedActionStatus {
+  "Waiting for the member to confirm or reject it."
+  PENDING
+  "Confirmed; its tool is running."
+  RUNNING
+  "Confirmed and applied; `result` holds the tool's output."
+  CONFIRMED
+  "The member said no; nothing ran."
+  REJECTED
+  "Nobody answered within 15 minutes; nothing ran."
+  EXPIRED
+  "Confirmed but the tool failed; `resultCode` says why."
+  FAILED
+}
+
+"""
+A write the model asked for (memory's `remember` and `forget`, later the MCP
+tools) that waits for the member's word (spec 4.8, 4.9). Only its owner reads
+it: another member gets `conversations.errors.action-not-found`, and so does the
+admin. Confirming applies it; it does not start a new model turn.
+"""
+type ProposedAction {
+  "The action's id: `actionId` of the message's proposed-action part."
+  id: ID!
+  "The conversation whose run proposed it."
+  conversationId: ID!
+  "The assistant message that carries it."
+  messageId: ID!
+  "The tool the model called."
+  tool: String!
+  "What the confirmation card says, in words; null when the tool gave none."
+  summary: String
+  "What the model sent."
+  input: JSON!
+  "Where it stands: a pending action past its expiry reads EXPIRED."
+  status: ProposedActionStatus!
+  "After this instant it can no longer be confirmed."
+  expiresAt: DateTime!
+  "The tool's output once CONFIRMED; null otherwise."
+  result: JSON
+  "The tool's error code once FAILED; null otherwise."
+  resultCode: String
+  "When the member answered, or it expired; null while PENDING or RUNNING."
+  decidedAt: DateTime
+  "When it was proposed."
+  createdAt: DateTime!
+}
+
+"A proposed action of a message, as the confirmation card shows it."
+type MessageProposedActionPart {
+  "The action's id, for `confirmAction` and `rejectAction`."
+  actionId: ID!
+  "The tool the model called."
+  tool: String!
+  "What the member is asked to confirm, in words; null when the tool gave none."
+  summary: String
+  "Where the action stands now."
+  status: ProposedActionStatus!
+}
+
+extend type Query {
+  """
+  The member's actions still waiting in a conversation, oldest first (the
+  expired ones are left out). 404 `conversations.errors.not-found` for a
+  conversation that is not the member's.
+  """
+  pendingActions("The conversation." conversationId: ID!): [ProposedAction!]!
+}
+
+extend type Mutation {
+  """
+  Confirms a pending action and applies it now; answers it with its outcome. A
+  second confirm answers the stored outcome and runs nothing. 404
+  `conversations.errors.action-not-found`; 409 `conversations.errors.action-expired`
+  past its expiry; 409 `conversations.errors.action-not-ready` while the
+  message is still being written.
+  """
+  confirmAction("The action's id." id: ID!): ProposedAction!
+  "Rejects a pending action: nothing runs. Answers an action already decided as it stands."
+  rejectAction("The action's id." id: ID!): ProposedAction!
+}

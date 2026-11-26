@@ -23,6 +23,9 @@ export const codes = defineCodes("conversations", [
   "reaction-limit",
   "restore-expired",
   "too-many-exports",
+  "action-not-found",
+  "action-expired",
+  "action-not-ready",
 ]);
 
 // An id that names no conversation of the viewer (or a malformed one).
@@ -115,3 +118,16 @@ export async function limitedSend(limit: () => Promise<void>) {
     throw error;
   }
 }
+
+// An id that names no proposed action of the viewer (or a malformed one):
+// another member's, the admin's included.
+export const actionNotFound = () =>
+  fail("conversations.errors.action-not-found", { status: 404 });
+
+// The action's time to be answered has passed: nothing ran.
+export const actionExpired = () =>
+  fail("conversations.errors.action-expired", { status: 409 });
+
+// The message that carries the action is still being written.
+export const actionNotReady = () =>
+  fail("conversations.errors.action-not-ready", { status: 409 });

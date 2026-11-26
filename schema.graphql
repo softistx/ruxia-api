@@ -646,6 +646,34 @@ type MemberUsage {
 }
 
 """
+One fact a persona remembers about the signed-in member (spec 4.8). Only its
+owner reads it: another member gets `memory.errors.not-found`, and so does the
+admin.
+"""
+type MemoryItem {
+  """When it was added."""
+  createdAt: DateTime!
+  """The item's id."""
+  id: ID!
+  """The persona it belongs to."""
+  personaId: ID!
+  """Who wrote it."""
+  source: MemorySource!
+  """The fact, up to 500 characters."""
+  text: String!
+  """When it last changed."""
+  updatedAt: DateTime!
+}
+
+"""Who wrote a remembered fact."""
+enum MemorySource {
+  """The persona's model, through a confirmed `remember`."""
+  MODEL
+  """The member."""
+  USER
+}
+
+"""
 A message of a conversation's tree (spec 4.5): `parentId` is the message it
 follows, so a conversation branches where a message has several children.
 """
@@ -715,9 +743,23 @@ type MessageEdge {
 }
 
 """
-A part of a message, in order: text, reasoning, or an attachment reference (a member's message). Tool calls and results are not shown yet.
+A part of a message, in order: text, reasoning, an attachment reference (a member's message) or a proposed action to confirm. Tool calls and results are not shown.
 """
-union MessagePart = MessageAttachmentPart | MessageTextPart | MessageThinkingPart
+union MessagePart = MessageAttachmentPart | MessageProposedActionPart | MessageTextPart | MessageThinkingPart
+
+"""A proposed action of a message, as the confirmation card shows it."""
+type MessageProposedActionPart {
+  """The action's id, for `confirmAction` and `rejectAction`."""
+  actionId: ID!
+  """Where the action stands now."""
+  status: ProposedActionStatus!
+  """
+  What the member is asked to confirm, in words; null when the tool gave none.
+  """
+  summary: String
+  """The tool the model called."""
+  tool: String!
+}
 
 """Who wrote a message."""
 enum MessageRole {
@@ -859,6 +901,32 @@ type Mutation {
     code: String! @constraint(maxLength: 20)
   ): RecoveryCodes!
   """
+  Adds a fact the member wrote (source USER). 409 `memory.errors.full` past 200
+  items for the persona; `text` is refused when blank or past 500 characters.
+  """
+  addMemoryItem(
+    """The persona."""
+    personaId: ID!
+    """The fact; at most 500 characters once trimmed."""
+    text: String! @constraint(maxLength: 2000)
+  ): MemoryItem!
+  """Deletes every fact the member has for a persona and answers how many."""
+  clearMemory(
+    """The persona."""
+    personaId: ID!
+  ): Int!
+  """
+  Confirms a pending action and applies it now; answers it with its outcome. A
+  second confirm answers the stored outcome and runs nothing. 404
+  `conversations.errors.action-not-found`; 409 `conversations.errors.action-expired`
+  past its expiry; 409 `conversations.errors.action-not-ready` while the
+  message is still being written.
+  """
+  confirmAction(
+    """The action's id."""
+    id: ID!
+  ): ProposedAction!
+  """
   The code of the authenticator app, for the challenge signIn (or
   confirmMagicLink) answered. 400 `auth.errors.invalid-code` (with
   `attemptsLeft`) for a wrong code, a code already used included;
@@ -918,6 +986,11 @@ type Mutation {
     """The conversation's id."""
     id: ID! @constraint(maxLength: 64)
   ): Conversation!
+  """Deletes one of the member's facts and answers its id."""
+  deleteMemoryItem(
+    """The item."""
+    id: ID!
+  ): ID!
   """
   Deletes the member's own persona (and unfeatures it): it leaves every list, and the conversations
   held with it stay readable. Answers its id. 404 `personas.errors.not-found`,
@@ -1100,6 +1173,13 @@ type Mutation {
     """What `navigator.credentials.create` produced."""
     response: JSONObject!
   ): Passkey!
+  """
+  Rejects a pending action: nothing runs. Answers an action already decided as it stands.
+  """
+  rejectAction(
+    """The action's id."""
+    id: ID!
+  ): ProposedAction!
   """
   Removes one of the viewer's passkeys; false for one that is not theirs. Needs
   a session confirmed within 10 minutes (403 `auth.errors.step-up-required`).
@@ -1313,6 +1393,15 @@ type Mutation {
     """The settings to change."""
     input: MemberSettingsInput!
   ): MemberSettings!
+  """
+  Replaces the text of one of the member's facts. 404 `memory.errors.not-found` for any other.
+  """
+  updateMemoryItem(
+    """The item."""
+    id: ID!
+    """The new text; at most 500 characters once trimmed."""
+    text: String! @constraint(maxLength: 2000)
+  ): MemoryItem!
   """
   Changes the member's own persona. 404 `personas.errors.not-found` for an
   unknown or PRIVATE one of someone else, 403 `personas.errors.not-owner` for a
@@ -1561,6 +1650,59 @@ scalar PositiveFloat
 scalar PositiveInt
 
 """
+A write the model asked for (memory's `remember` and `forget`, later the MCP
+tools) that waits for the member's word (spec 4.8, 4.9). Only its owner reads
+it: another member gets `conversations.errors.action-not-found`, and so does the
+admin. Confirming applies it; it does not start a new model turn.
+"""
+type ProposedAction {
+  """The conversation whose run proposed it."""
+  conversationId: ID!
+  """When it was proposed."""
+  createdAt: DateTime!
+  """
+  When the member answered, or it expired; null while PENDING or RUNNING.
+  """
+  decidedAt: DateTime
+  """After this instant it can no longer be confirmed."""
+  expiresAt: DateTime!
+  """The action's id: `actionId` of the message's proposed-action part."""
+  id: ID!
+  """What the model sent."""
+  input: JSON!
+  """The assistant message that carries it."""
+  messageId: ID!
+  """The tool's output once CONFIRMED; null otherwise."""
+  result: JSON
+  """The tool's error code once FAILED; null otherwise."""
+  resultCode: String
+  """Where it stands: a pending action past its expiry reads EXPIRED."""
+  status: ProposedActionStatus!
+  """
+  What the confirmation card says, in words; null when the tool gave none.
+  """
+  summary: String
+  """The tool the model called."""
+  tool: String!
+}
+
+"""Where a proposed action stands."""
+enum ProposedActionStatus {
+  """Confirmed and applied; `result` holds the tool's output."""
+  CONFIRMED
+  """Nobody answered within 15 minutes; nothing ran."""
+  EXPIRED
+  """Confirmed but the tool failed; `resultCode` says why."""
+  FAILED
+  """Waiting for the member to confirm or reject it."""
+  PENDING
+  """The member said no; nothing ran."""
+  REJECTED
+  """Confirmed; its tool is running."""
+  RUNNING
+}
+
+"""
 Read operations. A signed-in viewer is needed unless a field says otherwise;
 an unauthenticated call is 401 `auth.errors.unauthenticated`.
 """
@@ -1663,6 +1805,15 @@ type Query {
     first: Int = 20 @constraint(min: 1, max: 100)
   ): MemberConnection!
   """
+  The member's remembered facts for a persona they may read (a deleted one
+  too), newest first, at most 200. 404 `personas.errors.not-found` for a
+  persona the member cannot read.
+  """
+  memoryItems(
+    """The persona."""
+    personaId: ID!
+  ): [MemoryItem!]!
+  """
   The models, Claude first, then by name. Members see the enabled ones;
   `includeDisabled: true` also lists the disabled and is for administrators
   only: 403 `auth.errors.forbidden`.
@@ -1671,6 +1822,15 @@ type Query {
     """Also list the models an administrator has not enabled."""
     includeDisabled: Boolean = false
   ): [Model!]!
+  """
+  The member's actions still waiting in a conversation, oldest first (the
+  expired ones are left out). 404 `conversations.errors.not-found` for a
+  conversation that is not the member's.
+  """
+  pendingActions(
+    """The conversation."""
+    conversationId: ID!
+  ): [ProposedAction!]!
   """
   One persona: the member's own, or a TEAM one. 404 `personas.errors.not-found`
   for anything else, another member's PRIVATE persona and a deleted one

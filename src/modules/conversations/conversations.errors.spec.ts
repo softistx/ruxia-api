@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Throttled } from "../../limits/ports";
 import {
+  actionExpired,
+  actionNotFound,
+  actionNotReady,
   codes,
   invalidCursor,
   limitedExport,
@@ -72,8 +75,8 @@ describe("conversations errors", () => {
     await expect(broken).rejects.toThrow("boom");
   });
 
-  test("the inventory names all fifteen", () => {
-    expect(codes).toHaveLength(15);
+  test("the inventory names all eighteen", () => {
+    expect(codes).toHaveLength(18);
     expect(codes).toContain("conversations.errors.invalid-parent");
   });
 
@@ -90,5 +93,16 @@ describe("conversations errors", () => {
     ).rejects.toMatchObject({
       extensions: { code: "conversations.errors.too-many-exports" },
     });
+  });
+
+  test("the action refusals are 404, 409 and 409", () => {
+    expect(actionNotFound().extensions["http"]).toEqual({ status: 404 });
+    expect(actionExpired().extensions["code"]).toBe(
+      "conversations.errors.action-expired",
+    );
+    expect(actionExpired().extensions["http"]).toEqual({ status: 409 });
+    expect(actionNotReady().extensions["code"]).toBe(
+      "conversations.errors.action-not-ready",
+    );
   });
 });

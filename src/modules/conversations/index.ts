@@ -1,3 +1,4 @@
+export * from "./conversations.actions.utils";
 export * from "./conversations.adapters";
 export * from "./conversations.errors";
 export * from "./conversations.events";

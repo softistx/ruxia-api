@@ -1,9 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { fakeModel } from "@softistx/ai-testing";
 import { mediaObjectKey } from "@softistx/alxia-media";
 import { ObjectId } from "mongodb";
+import { adaptersByModel } from "~/ai";
 import { authApp } from "~/auth";
 import { clearBudgets } from "~/budgets";
-import { ask, memberOf, scripted, startedBy } from "~/conversations";
+import { ask, memberOf, scripted, sonnet, startedBy } from "~/conversations";
 import { memoryBucket } from "~/media";
 import { appMongo } from "../../config/db";
 import { AttachmentsPurge, attachmentPlace } from "../attachments";
@@ -82,6 +84,60 @@ describe("ConversationsPurge", () => {
       .toArray();
     expect(after).toEqual(before);
     expect((await ada.budgets.usage()).spentUsd).toBeGreaterThan(0);
+  });
+
+  test("a purged conversation takes its proposed actions with it, and the member's memory stays", async () => {
+    const usage = {
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    const { bucket } = memoryBucket();
+    const ada = await memberOf(kit, {
+      media: bucket,
+      adapters: adaptersByModel({
+        [sonnet]: fakeModel([
+          {
+            toolCalls: [{ name: "remember", input: { text: "Likes tea" } }],
+            usage,
+          },
+          { text: "Noted", usage },
+        ]),
+        "claude-haiku-5-5": fakeModel([{ object: { title: "T" }, usage }]),
+      }),
+    });
+    const sage = await ada.personas.create({
+      name: "Sage",
+      defaultModelId: sonnet,
+      tools: { memory: true },
+    });
+    const personaId = String(sage._id);
+    await ada.memory.add(personaId, "Kept", "user");
+    const conversation = await ada.conversations.start({ personaId });
+    const sent = await ada.runs.send({
+      conversationId: String(conversation._id),
+      text: "Hi",
+    });
+    await ada.runtime.settled(sent.runId);
+    await kit.auth.background.settled();
+    await ada.conversations.delete(String(conversation._id));
+    await appMongo.db.conversations.raw.updateOne(
+      { _id: conversation._id },
+      { $set: { deletedAt: new Date(Date.now() - RESTORE_WINDOW_MS - day) } },
+    );
+    const actions = { conversationId: conversation._id };
+    expect(await appMongo.db.proposedActions.raw.countDocuments(actions)).toBe(
+      1,
+    );
+    await purgeOf({ media: bucket }).tick();
+    expect(await live(conversation._id)).toBeNull();
+    expect(await appMongo.db.proposedActions.raw.countDocuments(actions)).toBe(
+      0,
+    );
+    expect((await ada.memory.list(personaId)).map((i) => i.text)).toEqual([
+      "Kept",
+    ]);
   });
 
   test("hard-deletes what was deleted more than 30 days ago, with messages and exports", async () => {

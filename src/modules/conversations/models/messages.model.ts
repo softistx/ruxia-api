@@ -35,7 +35,7 @@ const toolCallPart = z.object({
   name: z.string(),
   input: z.unknown(),
 });
-const toolResultPart = z.union([
+export const toolResultPart = z.union([
   z.object({
     type: z.literal("tool-result"),
     callId: z.string(),

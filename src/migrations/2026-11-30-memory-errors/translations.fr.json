@@ -1,0 +1,7 @@
+{
+  "memory.errors.not-found": "Ce souvenir n'existe pas.",
+  "memory.errors.full": "Ce personnage retient déjà {max, plural, one {# souvenir} other {# souvenirs}}, le maximum qu'il peut garder pour vous. Supprimez-en pour en ajouter.",
+  "conversations.errors.action-not-found": "Cette action n'existe pas.",
+  "conversations.errors.action-expired": "Cette action n'a pas été confirmée à temps. Redemandez-la si vous la voulez toujours.",
+  "conversations.errors.action-not-ready": "La réponse qui propose cette action est encore en cours d'écriture. Confirmez-la une fois la réponse terminée."
+}
