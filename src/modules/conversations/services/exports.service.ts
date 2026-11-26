@@ -1,13 +1,9 @@
-import {
-  type MediaBucket,
-  mediaObjectKey,
-  newMediaKey,
-} from "@softistx/alxia-media";
+import { type MediaBucket, newMediaKey } from "@softistx/alxia-media";
 import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import type { ExportFormat as ShownFormat } from "../../../generated/graphql/resolvers";
-import type { Throttle } from "../../../limits/ports";
+import type { Throttle } from "../../../limits/throttle";
 import { unavailable } from "../../../shared/errors";
 import { limitedExport } from "../conversations.errors";
 import {
@@ -16,15 +12,13 @@ import {
   markdownOf,
   markdownType,
 } from "../conversations.export.utils";
-import { exportKindName } from "../conversations.media";
+import { exportPlace } from "../conversations.media";
 import type { ConversationDocument, ExportFormat } from "../models";
 import type { ConversationsService } from "./conversations.service";
 import type { MessagesService } from "./messages.service";
 
 // The bucket calls the exports make, a port the registry passes.
 export type ExportBucket = Pick<MediaBucket, "put" | "delete">;
-
-const placeOf = (key: string) => ({ key: mediaObjectKey(exportKindName, key) });
 
 // Files of a member's conversations, for one request. A Markdown export is the
 // branch shown; a JSON export is the whole tree (every branch, each message
@@ -58,7 +52,7 @@ export class ExportsService {
     const [body, type] = await this.render(conversation, format);
     const key = newMediaKey();
     try {
-      await this.bucket.put(placeOf(key), body, { type });
+      await this.bucket.put(exportPlace(key), body, { type });
     } catch {
       throw unavailable();
     }
@@ -66,7 +60,11 @@ export class ExportsService {
     try {
       replaced = await this.record(conversation._id, format, key);
     } catch (error) {
-      await this.drop(key);
+      // The write may have landed before it failed: the file stays when the
+      // record names it.
+      if (!(await this.names(conversation._id, format, key))) {
+        await this.drop(key);
+      }
       throw error;
     }
     if (replaced !== undefined) await this.drop(replaced);
@@ -101,21 +99,30 @@ export class ExportsService {
   ) {
     const at = this.now();
     const raw = this.mongo.as(this.actor.id).db.conversationExports.raw;
-    const upsert = () =>
-      raw.findOneAndUpdate(
-        { conversationId, format },
-        {
-          $set: { key, ownerId: this.actor.id, updatedAt: at },
-          $setOnInsert: { _id: new ObjectId(), createdAt: at },
-        },
-        { upsert: true, returnDocument: "before" },
-      );
+    const before = await raw.findOneAndUpdate(
+      { conversationId, format },
+      {
+        $set: { key, ownerId: this.actor.id, updatedAt: at },
+        $setOnInsert: { _id: new ObjectId(), createdAt: at },
+      },
+      { upsert: true, returnDocument: "before" },
+    );
+    return before?.key;
+  }
+
+  // Whether the conversation's record for `format` names `key`: the read that
+  // settles a write whose answer was lost.
+  private async names(
+    conversationId: ObjectId,
+    format: ExportFormat,
+    key: string,
+  ) {
     try {
-      return (await upsert())?.key;
-    } catch (error) {
-      // Two exports raced to insert the first record: the loser updates it.
-      if ((error as { code?: number }).code !== 11000) throw error;
-      return (await upsert())?.key;
+      const raw = this.mongo.as(this.actor.id).db.conversationExports.raw;
+      return (await raw.findOne({ conversationId, format }))?.key === key;
+    } catch {
+      // Unknown: keep the file; a stray one is swept with the conversation.
+      return true;
     }
   }
 
@@ -123,7 +130,7 @@ export class ExportsService {
   // left (the purge sweeps by conversation, and nothing reads it).
   private async drop(key: string) {
     try {
-      await this.bucket.delete(placeOf(key));
+      await this.bucket.delete(exportPlace(key));
     } catch (error) {
       this.warn(`export file not removed: ${(error as Error).name}`);
     }

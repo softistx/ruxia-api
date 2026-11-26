@@ -5,6 +5,7 @@ import { authApp } from "~/auth";
 import { memberOf, sonnet } from "~/conversations";
 import { graphql } from "~/generated/graphql";
 import { memoryBucket } from "~/media";
+import { exportKind, exportPlace } from "./conversations.media";
 
 const EXPORT = graphql(`
   mutation ExportKey($id: ID!, $format: ExportFormat!) {
@@ -67,5 +68,20 @@ describe("the conversation exports over /media", () => {
       }),
     );
     expect(put.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("exportPlace and the kind's read rule", () => {
+  test("exportPlace is the kind's folder and the key", () => {
+    expect(exportPlace("abc")).toEqual({ key: "conversation-exports/abc" });
+  });
+
+  test("a read needs a viewer with a role, and the owner's right", async () => {
+    const kind = exportKind({ exports: { mayRead: async () => true } });
+    const ask = (viewer: unknown) =>
+      kind.authorizeRead({ viewer } as never, "k");
+    expect(await ask(null)).toBe(false);
+    expect(await ask({ id: "a", role: null })).toBe(false);
+    expect(await ask({ id: "a", role: "member" })).toBe(true);
   });
 });

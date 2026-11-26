@@ -58,6 +58,11 @@ export const conversations = defineCollection({
       default_language: "none",
     },
     {
+      key: { ownerId: 1, deletedAt: -1 },
+      name: "conversations_trash",
+      partialFilterExpression: { deletedAt: { $type: "date" } },
+    },
+    {
       key: { deletedAt: 1 },
       name: "conversations_deleted",
       partialFilterExpression: { deletedAt: { $type: "date" } },

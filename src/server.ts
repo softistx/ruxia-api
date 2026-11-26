@@ -11,6 +11,7 @@ import {
   ConversationsPurge,
   PURGE_BATCH,
   PURGE_BUDGET_MS,
+  PURGE_DEADLINE_MS,
   PURGE_INTERVAL_MS,
   sweepRuns,
 } from "./modules/conversations";
@@ -96,6 +97,7 @@ const purge = new ConversationsPurge({
   intervalMs: PURGE_INTERVAL_MS,
   batch: PURGE_BATCH,
   budgetMs: PURGE_BUDGET_MS,
+  deadlineMs: PURGE_DEADLINE_MS,
   log: (message) => console.warn(message),
 });
 purge.start();

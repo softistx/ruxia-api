@@ -1,8 +1,8 @@
-import { type MediaBucket, mediaObjectKey } from "@softistx/alxia-media";
+import type { MediaBucket } from "@softistx/alxia-media";
 import type { ObjectId } from "mongodb";
 import type { AppMongo } from "../../config/db";
 import type { Ticker } from "../models";
-import { exportKindName } from "./conversations.media";
+import { exportPlace } from "./conversations.media";
 import { PURGE_HOLD_MS, RESTORE_WINDOW_MS } from "./conversations.rules";
 import { claimPurgeWrite } from "./conversations.writes.utils";
 
@@ -11,6 +11,9 @@ export const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // Conversations read per batch, and how long one tick may keep taking batches.
 export const PURGE_BATCH = 100;
 export const PURGE_BUDGET_MS = 5 * 60 * 1000;
+// The longest one conversation may take: well under the hold, so a purge that
+// hangs is given up on before another may take its conversation over.
+export const PURGE_DEADLINE_MS = 5 * 60 * 1000;
 
 export interface PurgePorts {
   mongo: Pick<AppMongo, "db">;
@@ -21,6 +24,8 @@ export interface PurgePorts {
   // Conversations taken per batch (PURGE_BATCH), and the time one tick may spend.
   batch: number;
   budgetMs: number;
+  // The longest the purge of one conversation may take (PURGE_DEADLINE_MS).
+  deadlineMs: number;
   log: (message: string) => void;
 }
 
@@ -50,21 +55,27 @@ export class ConversationsPurge {
     this.stopTicking = undefined;
   }
 
-  // One sweep, skipped while the previous one runs: batches until a short one
-  // or the time budget. It never throws; a conversation that fails is logged
-  // and retried when its hold goes stale. Returns how many it purged.
+  // One sweep, skipped while the previous one runs: batches until a short one,
+  // a batch where nothing was purged (so a failing database is not hammered)
+  // or the time budget. It never throws, and a tick always ends, so the next
+  // one runs. Returns how many conversations it purged.
   async tick(): Promise<number> {
     if (this.running) return 0;
     this.running = true;
     const started = this.ports.now().getTime();
+    const over = () =>
+      this.ports.now().getTime() - started >= this.ports.budgetMs;
     let purged = 0;
     try {
       for (;;) {
         const due = await this.due();
-        for (const id of due) if (await this.purge(id)) purged += 1;
-        const spent = this.ports.now().getTime() - started;
-        if (due.length < this.ports.batch || spent >= this.ports.budgetMs)
-          break;
+        let taken = 0;
+        for (const id of due) {
+          if (over()) break;
+          if (await this.withinDeadline(id)) taken += 1;
+        }
+        purged += taken;
+        if (due.length < this.ports.batch || taken === 0 || over()) break;
       }
     } catch (error) {
       this.ports.log(`purge failed: ${(error as Error).name}`);
@@ -72,6 +83,24 @@ export class ConversationsPurge {
       this.running = false;
     }
     return purged;
+  }
+
+  // One conversation's purge, given up on (logged, its hold left to go stale)
+  // when it outlasts the deadline.
+  private async withinDeadline(id: ObjectId) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<false>((resolve) => {
+      timer = setTimeout(() => {
+        this.ports.log(`purge of ${String(id)} timed out`);
+        resolve(false);
+      }, this.ports.deadlineMs);
+      timer.unref();
+    });
+    try {
+      return await Promise.race([this.purge(id), late]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async due(): Promise<ObjectId[]> {
@@ -111,7 +140,7 @@ export class ConversationsPurge {
       if (taken.matchedCount === 0) return false;
       const exports = mongo.db.conversationExports.raw;
       for (const file of await exports.find({ conversationId }).toArray()) {
-        await media.delete({ key: mediaObjectKey(exportKindName, file.key) });
+        await media.delete(exportPlace(file.key));
       }
       await exports.deleteMany({ conversationId });
       await mongo.db.messages.raw.deleteMany({ conversationId });

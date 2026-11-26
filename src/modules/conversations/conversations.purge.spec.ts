@@ -9,6 +9,7 @@ import {
   ConversationsPurge,
   PURGE_BATCH,
   PURGE_BUDGET_MS,
+  PURGE_DEADLINE_MS,
   type PurgePorts,
 } from "./conversations.purge";
 import { PURGE_HOLD_MS, RESTORE_WINDOW_MS } from "./conversations.rules";
@@ -33,6 +34,7 @@ const purgeOf = (ports: Partial<PurgePorts> & Pick<PurgePorts, "media">) =>
     intervalMs: 1,
     batch: PURGE_BATCH,
     budgetMs: PURGE_BUDGET_MS,
+    deadlineMs: PURGE_DEADLINE_MS,
     log: () => {},
     ...ports,
   });
@@ -237,5 +239,64 @@ describe("ConversationsPurge", () => {
     expect(ticks).toHaveLength(1);
     purge.stop();
     expect(stopped).toBe(true);
+  });
+
+  test("a media delete that hangs times out, and the next tick runs", async () => {
+    const ada = await memberOf(kit, { adapters: scripted("a", "b") });
+    const hung = await deletedAgo(ada, RESTORE_WINDOW_MS + day);
+    await appMongo.db.conversationExports.raw.insertOne({
+      _id: new ObjectId(),
+      key: crypto.randomUUID(),
+      ownerId: ada.id,
+      conversationId: hung,
+      format: "json",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const logs: string[] = [];
+    const stuck = purgeOf({
+      media: { delete: () => new Promise<void>(() => {}) },
+      deadlineMs: 30,
+      log: (message) => logs.push(message),
+    });
+    expect(await stuck.tick()).toBe(0);
+    expect(logs.some((message) => message.includes("timed out"))).toBe(true);
+    expect(await live(hung)).not.toBeNull();
+    const next = await deletedAgo(ada, RESTORE_WINDOW_MS + day);
+    expect(await stuck.tick()).toBe(1);
+    expect(await live(next)).toBeNull();
+  });
+
+  test("a batch where nothing is purged ends the tick", async () => {
+    const ada = await memberOf(kit, { adapters: scripted("a", "b", "c") });
+    const ids = [];
+    for (let i = 0; i < 3; i += 1) {
+      const id = await deletedAgo(ada, RESTORE_WINDOW_MS + day);
+      await appMongo.db.conversationExports.raw.insertOne({
+        _id: new ObjectId(),
+        key: crypto.randomUUID(),
+        ownerId: ada.id,
+        conversationId: id,
+        format: "json",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      ids.push(id);
+    }
+    let calls = 0;
+    const failing = purgeOf({
+      media: {
+        delete: async () => {
+          calls += 1;
+          throw new Error("bucket down");
+        },
+      },
+      batch: 1,
+    });
+    expect(await failing.tick()).toBe(0);
+    expect(calls).toBe(1);
+    await appMongo.db.conversationExports.raw.deleteMany({
+      conversationId: { $in: ids },
+    });
   });
 });

@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mediaObjectKey } from "@softistx/alxia-media";
+import { Collection } from "mongodb";
 import { authApp } from "~/auth";
 import { ask, memberOf, scripted, startedBy } from "~/conversations";
 import { memoryBucket } from "~/media";
@@ -131,6 +132,74 @@ describe("ExportsService", () => {
     await expect(ada.exports.export(id, "JSON")).rejects.toMatchObject(
       refused("conversations.errors.too-many-exports"),
     );
+  });
+});
+
+describe("ExportsService: a write that fails after the file is stored", () => {
+  const failingUpsert = (lands: boolean) => {
+    const real = Collection.prototype.findOneAndUpdate;
+    return spyOn(Collection.prototype, "findOneAndUpdate").mockImplementation(
+      async function (this: Collection, ...args: never[]) {
+        if (this.collectionName !== "conversationExports") {
+          return (real as (...a: unknown[]) => Promise<unknown>).apply(
+            this,
+            args,
+          );
+        }
+        if (lands) {
+          await (real as (...a: unknown[]) => Promise<unknown>).apply(
+            this,
+            args,
+          );
+        }
+        throw new Error("answer lost");
+      } as never,
+    );
+  };
+
+  test("the new file is removed when the record does not name it", async () => {
+    const { bucket, objects } = memoryBucket();
+    const ada = await memberOf(kit, {
+      adapters: scripted("one"),
+      media: bucket,
+    });
+    const id = await startedBy(ada);
+    await ask(kit, ada, id, "Hi");
+    const spy = failingUpsert(false);
+    try {
+      await expect(ada.exports.export(id, "JSON")).rejects.toThrow(
+        "answer lost",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(
+      [...objects.keys()].filter((key) =>
+        key.startsWith("conversation-exports/"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("the file stays when the record names it", async () => {
+    const { bucket, objects } = memoryBucket();
+    const ada = await memberOf(kit, {
+      adapters: scripted("one"),
+      media: bucket,
+    });
+    const id = await startedBy(ada);
+    await ask(kit, ada, id, "Hi");
+    const spy = failingUpsert(true);
+    try {
+      await expect(ada.exports.export(id, "JSON")).rejects.toThrow(
+        "answer lost",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    const record = await appMongo.db.conversationExports.raw.findOne({
+      conversationId: (await ada.conversations.find(id))._id,
+    });
+    expect(objects.has(place(record?.key ?? ""))).toBe(true);
   });
 });
 
