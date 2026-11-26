@@ -14,8 +14,8 @@ try {
   await syncMongoInvitations(databaseOf(appMongo));
   // The vector search index of the chunks: created once, needs `mongot`
   // (deploy/docker-compose.yaml). A failure stops the step.
-  const created = await ensureVectorIndex(appMongo.db.chunks.raw);
-  console.log(JSON.stringify({ vectorIndexCreated: created }));
+  const vectorIndex = await ensureVectorIndex(appMongo.db.chunks.raw);
+  console.log(JSON.stringify({ vectorIndex }));
   console.log(JSON.stringify({ database: appMongo.db.databaseName }, null, 2));
 } finally {
   await closeDatabases();

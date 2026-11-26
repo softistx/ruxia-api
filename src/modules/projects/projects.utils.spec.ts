@@ -31,7 +31,7 @@ describe("the tool result and its citations", () => {
   const cited = {
     documentId: "d1",
     name: "Notes.md",
-    snippet: "hi",
+    text: "hi",
     score: 0.9,
   };
 
@@ -49,7 +49,23 @@ describe("the tool result and its citations", () => {
       isError: false,
       output: resultOf([cited]),
     };
-    expect(citationsOf(part)).toEqual([cited]);
+    expect(citationsOf(part)).toEqual([
+      { documentId: "d1", name: "Notes.md", snippet: "hi", score: 0.9 },
+    ]);
+  });
+
+  test("a citation shows the start of a long passage, the result carries all of it", () => {
+    const long = `${"word ".repeat(200)}END`;
+    const part = {
+      type: "tool-result",
+      name: "search_project",
+      isError: false,
+      output: resultOf([{ ...cited, text: long }]),
+    };
+    expect(JSON.stringify(part.output)).toContain("END");
+    const [shown] = citationsOf(part);
+    expect(shown?.snippet.endsWith("…")).toBe(true);
+    expect(shown?.snippet).not.toContain("END");
   });
 
   test("another tool, an error or another shape gives none", () => {

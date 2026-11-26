@@ -96,7 +96,6 @@ export class ProjectsPurge {
     );
     if (taken === null) return false;
     try {
-      await vectors.remove({ ownerId: taken.ownerId, projectId: id });
       const documents = await mongo.db.projectDocuments.raw
         .find({ projectId: taken._id })
         .toArray();
@@ -104,6 +103,9 @@ export class ProjectsPurge {
         await files.delete(projectDocumentPlace(document.key));
       }
       await mongo.db.projectDocuments.raw.deleteMany({ projectId: taken._id });
+      // After the records: an indexing still running then finds its document
+      // gone and removes what it wrote, and this removes the rest.
+      await vectors.remove({ ownerId: taken.ownerId, projectId: id });
       await mongo.db.projects.raw.deleteOne({ _id: taken._id });
       return true;
     } catch (error) {

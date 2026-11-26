@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { ObjectId } from "mongodb";
+import { type Document, ObjectId } from "mongodb";
 import { appMongo } from "../../config/db";
 import {
   type ChunkStore,
@@ -81,7 +81,7 @@ function store(answer: unknown[] = []) {
     },
     aggregate(pipeline) {
       pipelines.push(pipeline);
-      return { toArray: async () => answer };
+      return { toArray: async () => answer as Document[] };
     },
   };
   return { chunks, pipelines, writes, removed };
@@ -165,24 +165,54 @@ describe("mongoVectorIndex", () => {
 describe("ensureVectorIndex", () => {
   const search = (present: unknown[]) => {
     const created: object[] = [];
+    const updated: [string, object][] = [];
     return {
       created,
+      updated,
       collection: {
         listSearchIndexes: () => ({ toArray: async () => present }),
         createSearchIndex: async (definition: object) => {
           created.push(definition);
         },
+        updateSearchIndex: async (name: string, definition: object) => {
+          updated.push([name, definition]);
+        },
       },
     };
   };
 
-  test("creates the index once", async () => {
+  test("creates the index when it is not there", async () => {
     const missing = search([]);
-    expect(await ensureVectorIndex(missing.collection)).toBe(true);
+    expect(await ensureVectorIndex(missing.collection)).toBe("created");
     expect(missing.created).toEqual([vectorIndexDefinition]);
-    const there = search([{ name: VECTOR_INDEX_NAME }]);
-    expect(await ensureVectorIndex(there.collection)).toBe(false);
+  });
+
+  test("leaves an index that has the definition", async () => {
+    const there = search([
+      {
+        name: VECTOR_INDEX_NAME,
+        latestDefinition: vectorIndexDefinition.definition,
+      },
+    ]);
+    expect(await ensureVectorIndex(there.collection)).toBe("unchanged");
     expect(there.created).toEqual([]);
+    expect(there.updated).toEqual([]);
+  });
+
+  test("updates an index whose definition differs", async () => {
+    const old = search([
+      {
+        name: VECTOR_INDEX_NAME,
+        latestDefinition: {
+          fields: [{ type: "vector", path: "embedding", numDimensions: 384 }],
+        },
+      },
+    ]);
+    expect(await ensureVectorIndex(old.collection)).toBe("updated");
+    expect(old.updated).toEqual([
+      [VECTOR_INDEX_NAME, vectorIndexDefinition.definition],
+    ]);
+    expect(old.created).toEqual([]);
   });
 
   test("a server without the search component raises its error", async () => {
@@ -195,6 +225,7 @@ describe("ensureVectorIndex", () => {
         },
       }),
       createSearchIndex: async () => {},
+      updateSearchIndex: async () => {},
     };
     await expect(ensureVectorIndex(collection)).rejects.toThrow("Search index");
   });

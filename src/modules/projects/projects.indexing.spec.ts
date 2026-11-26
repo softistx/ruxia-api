@@ -7,6 +7,7 @@ import { fakeEmbedder, indexerOf, uploadDocument } from "~/projects";
 import { appMongo } from "../../config/db";
 import { noEmbedder } from "./projects.embedder";
 import { IndexingFailure } from "./projects.indexing";
+import { projectDocumentPlace } from "./projects.media";
 import { memoryVectorIndex } from "./projects.vector";
 
 const signal = new AbortController().signal;
@@ -183,6 +184,41 @@ describe("DocumentIndexer", () => {
     const vectors = memoryVectorIndex();
     await indexerOf({ embedder, vectors }, bucket.bucket).run(id, once, signal);
     expect(vectors.all()).toEqual([]);
+  });
+
+  test("a shutdown is not a failure of the document: the job goes back to the queue", async () => {
+    const { bucket, kit, id, state } = await setup();
+    const controller = new AbortController();
+    const embedder = {
+      async embed(): Promise<number[][]> {
+        controller.abort();
+        throw new Error("aborted");
+      },
+    };
+    const indexer = indexerOf({ ...kit.projects, embedder }, bucket.bucket);
+    await expect(indexer.run(id, last, controller.signal)).rejects.toThrow(
+      "aborted",
+    );
+    expect(await state()).toMatchObject({ status: "pending", errorCode: null });
+  });
+
+  test("a document that ends FAILED keeps no chunk", async () => {
+    const { bucket, kit, id, state } = await setup();
+    const indexer = indexerOf(kit.projects, bucket.bucket);
+    await indexer.run(id, once, signal);
+    expect(kit.projects.vectors.all()).toHaveLength(1);
+    const key = (await state())?.key as string;
+    bucket.objects.set(projectDocumentPlace(key).key, {
+      bytes: Uint8Array.from([0xff, 0xfe]),
+      type: "text/markdown",
+    });
+    await indexer.run(id, once, signal);
+    expect(await state()).toMatchObject({
+      status: "failed",
+      errorCode: "NOT_TEXT",
+      chunkCount: 0,
+    });
+    expect(kit.projects.vectors.all()).toEqual([]);
   });
 
   test("a failure carries its code", () => {

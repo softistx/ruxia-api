@@ -71,6 +71,42 @@ describe("DocumentsService", () => {
     ).toEqual([other]);
   });
 
+  test("a delete while the document is being indexed leaves no chunk, whichever finishes first", async () => {
+    const { bucket, ada, add } = await setup();
+    const id = await add("some words to index");
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached: () => void = () => {};
+    const embedding = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const gated = {
+      async embed(texts: string[]) {
+        reached();
+        await gate;
+        return texts.map(() => new Array<number>(768).fill(0.1));
+      },
+    };
+    const indexing = indexerOf(
+      { embedder: gated, vectors: kit.projects.vectors },
+      bucket.bucket,
+    ).run(id, { number: 1, of: 3 }, signal);
+    await embedding;
+    expect(await ada.documents.delete(id)).toBe(id);
+    release();
+    await indexing;
+    expect(kit.projects.vectors.all().some((c) => c.documentId === id)).toBe(
+      false,
+    );
+    expect(
+      await appMongo.db.projectDocuments.raw.countDocuments({
+        _id: new ObjectId(id),
+      }),
+    ).toBe(0);
+  });
+
   test("reindex puts a FAILED document PENDING again and queues it; an INDEXED one or a PDF is refused", async () => {
     const { ada, projectId, add } = await setup();
     const id = await add("words");

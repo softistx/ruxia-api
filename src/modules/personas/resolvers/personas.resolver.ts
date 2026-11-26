@@ -50,5 +50,14 @@ export const personas: Resolvers = {
     owner: (persona, _, ctx) => ctx.services.personas.ownerOf(persona.ownerId),
     mine: (persona, _, ctx) => persona.ownerId === ctx.viewer?.id,
     visibility: (persona) => shownVisibility(persona.visibility),
+    // What points at the owner's own things (their projects, their MCP
+    // servers) is the owner's to read: a member who reads a TEAM persona sees
+    // none.
+    projectIds: (persona, _, ctx) =>
+      persona.ownerId === ctx.viewer?.id ? persona.projectIds : [],
+    tools: (persona, _, ctx) =>
+      persona.ownerId === ctx.viewer?.id
+        ? persona.tools
+        : { ...persona.tools, mcpServerIds: [] },
   },
 };

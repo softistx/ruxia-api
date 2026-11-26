@@ -44,13 +44,13 @@ export const projects: Resolvers = {
   Project: {
     id: (project) => String(project._id),
     documents: (project, _, ctx) =>
-      ctx.services.documents.ofProject(String(project._id)),
+      ctx.services.projectLoaders.documents.load(String(project._id)),
     documentIds: async (project, _, ctx) =>
-      (await ctx.services.documents.ofProject(String(project._id))).map(
-        (document) => String(document._id),
-      ),
+      (
+        await ctx.services.projectLoaders.documents.load(String(project._id))
+      ).map((document) => String(document._id)),
     personaIds: (project, _, ctx) =>
-      ctx.services.personas.boundTo(String(project._id)),
+      ctx.services.projectLoaders.personaIds.load(String(project._id)),
     purgeAt: (project) =>
       project.deletedAt === null ? null : purgeAt(project.deletedAt),
   },

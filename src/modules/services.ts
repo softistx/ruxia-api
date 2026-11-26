@@ -75,7 +75,7 @@ export function services(deps: ServiceDeps) {
   const modelCatalogue = new ModelsService(appMongo, deps.statuses, (message) =>
     statusWarning("status", message),
   );
-  const projects = new ProjectsService(appMongo, deps.viewer, deps.now);
+  const { projects, documents } = projectsSide(deps);
   const personas = new PersonasService(
     appMongo,
     modelCatalogue,
@@ -132,18 +132,42 @@ export function services(deps: ServiceDeps) {
     personas,
     memory,
     projects,
-    documents: new DocumentsService(
-      appMongo,
-      projects,
-      deps.media,
-      deps.vectors,
-      deps.indexQueue,
-      deps.viewer,
-      (message) => statusWarning("documents", message),
-    ),
+    documents,
+    projectLoaders: projectLoaders(documents, personas),
     ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
+    ),
+  };
+}
+
+// The projects and their documents, for a request.
+function projectsSide(deps: ServiceDeps) {
+  const projects = new ProjectsService(appMongo, deps.viewer, deps.now);
+  const documents = new DocumentsService(
+    appMongo,
+    projects,
+    deps.media,
+    deps.vectors,
+    deps.indexQueue,
+    deps.viewer,
+    (message) => statusWarning("documents", message),
+  );
+  return { projects, documents };
+}
+
+// What a project shows of its documents and personas, one read for a list of
+// projects.
+function projectLoaders(
+  documents: DocumentsService,
+  personas: PersonasService,
+) {
+  return {
+    documents: new DataLoader((ids: readonly string[]) =>
+      documents.ofProjects(ids),
+    ),
+    personaIds: new DataLoader((ids: readonly string[]) =>
+      personas.boundToAll(ids),
     ),
   };
 }

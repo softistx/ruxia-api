@@ -96,7 +96,10 @@ describe("citations in parts", () => {
           { type: "text", text: "Before" },
           result("search_project", {
             notice: "x",
-            results: [cited, { ...cited, documentId: "d2" }],
+            results: [
+              { documentId: "d1", name: "Notes.md", text: "hi", score: 0.8 },
+              { documentId: "d2", name: "Notes.md", text: "hi", score: 0.8 },
+            ],
           }),
           { type: "text", text: "After" },
         ],

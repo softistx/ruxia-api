@@ -1,4 +1,5 @@
 import { isObjectIdString } from "@softistx/mongo";
+import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import type { FileRecord } from "../models";
@@ -41,6 +42,24 @@ export class DocumentsService {
     });
   }
 
+  // The documents of several projects at once, for the loaders: one read, each
+  // project's oldest first, whether the project is live or deleted (the member
+  // reads what a delete just answered). Never another member's.
+  async ofProjects(projectIds: readonly string[]): Promise<FileRecord[][]> {
+    const ids = projectIds.filter((id) => isObjectIdString(id));
+    const found = await this.documents.findMany({
+      filter: {
+        ownerId: this.actor,
+        projectId: { $in: ids.map((id) => new ObjectId(id)) },
+      },
+      sort: { createdAt: 1, _id: 1 },
+      limit: 100 * Math.max(ids.length, 1),
+    });
+    return projectIds.map((id) =>
+      found.filter((document) => String(document.projectId) === id),
+    );
+  }
+
   // One of the member's documents, whatever its project's state.
   async find(id: string): Promise<FileRecord> {
     const found = isObjectIdString(id)
@@ -50,11 +69,13 @@ export class DocumentsService {
     return found;
   }
 
-  // Removes a document: its chunks first (nothing of it is searched any more),
-  // then its file (a failure is logged and the file left: nothing reads it),
-  // then the record. Answers its id.
+  // Removes a document: its record first (an indexing still running then finds
+  // it gone and removes what it wrote), then its chunks (nothing of it is
+  // searched any more), then its file (a failure is logged and the file left:
+  // nothing reads it). Answers its id.
   async delete(id: string) {
     const document = await this.find(id);
+    await this.documents.raw.deleteOne({ _id: document._id });
     await this.vectors.remove({
       ownerId: this.actor,
       documentId: String(document._id),
@@ -64,7 +85,6 @@ export class DocumentsService {
     } catch (error) {
       this.warn(`document file not removed: ${(error as Error).name}`);
     }
-    await this.documents.raw.deleteOne({ _id: document._id });
     return String(document._id);
   }
 

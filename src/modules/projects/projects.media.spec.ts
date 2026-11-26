@@ -3,8 +3,14 @@ import { ObjectId } from "mongodb";
 import { authApp, signedInAccount } from "~/auth";
 import { memberOf } from "~/conversations";
 import { memoryBucket, png } from "~/media";
+import { uploadDocument } from "~/projects";
 import { appMongo } from "../../config/db";
+import {
+  projectDocumentUploaded,
+  TEXT_DOCUMENT_MAX_BYTES,
+} from "./projects.media";
 import { MAX_DOCUMENTS } from "./projects.rules";
+import { DocumentFiles } from "./services/document-files.service";
 
 const origin = "https://ui.ruxia.test/media/project-documents";
 type Kit = ReturnType<typeof authApp>;
@@ -158,5 +164,84 @@ describe("the project documents over /media", () => {
       (await upload(kit, ada.token, project, "more", "text/plain")).status,
     ).toBe(402);
     expect(bucket.objects.size).toBe(stored);
+  });
+});
+
+describe("the limits a route cannot check", () => {
+  const stored = (size: number) => ({
+    key: crypto.randomUUID(),
+    contentType: "text/plain",
+    size,
+    kind: "project-documents",
+    renditions: [],
+  });
+
+  test("a text body past its limit with no declared length is 413 after the store", async () => {
+    const { ada } = await setup();
+    const files = {
+      add: async () => ({ _id: "x", name: "n", status: "pending" }),
+    };
+    const request = new Request(
+      "https://ui.ruxia.test/media/project-documents",
+    );
+    await expect(
+      projectDocumentUploaded(
+        { files: files as never },
+        stored(TEXT_DOCUMENT_MAX_BYTES + 1) as never,
+        { viewer: { id: ada.id } as never, request },
+      ),
+    ).rejects.toMatchObject({ code: "too_large" });
+  });
+
+  test("an upload that puts the project over 100 removes its own record", async () => {
+    const { kit, ada, project } = await setup();
+    const real = appMongo.db.projectDocuments.raw;
+    let first = true;
+    const racing = new Proxy(real, {
+      get(target, property, receiver) {
+        if (property !== "countDocuments")
+          return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof real.countDocuments>) => {
+          // The check before the insert sees room: another upload is racing it.
+          if (first) {
+            first = false;
+            return 0;
+          }
+          return target.countDocuments(...args);
+        };
+      },
+    });
+    const mongo = {
+      as: (id: string) => appMongo.as(id),
+      db: { projects: appMongo.db.projects, projectDocuments: { raw: racing } },
+    } as unknown as typeof appMongo;
+    const row = await uploadDocument(
+      kit,
+      memoryBucket().bucket,
+      ada.id,
+      project,
+      { text: "x" },
+    );
+    const { _id: _taken, id: _read, ...seed } = row;
+    await real.insertMany(
+      Array.from({ length: MAX_DOCUMENTS - 1 }, () => ({
+        ...seed,
+        _id: new ObjectId(),
+        key: crypto.randomUUID(),
+      })),
+    );
+    const files = new DocumentFiles(mongo, kit.projects.queue, () => {});
+    const input = {
+      projectId: project,
+      key: crypto.randomUUID(),
+      name: "n",
+      mime: "text/plain",
+      bytes: 1,
+    };
+    await expect(files.add(ada.id, input)).rejects.toMatchObject({
+      extensions: { code: "projects.errors.too-many-documents" },
+    });
+    expect(await real.countDocuments({ ownerId: ada.id })).toBe(MAX_DOCUMENTS);
+    expect(await real.countDocuments({ key: input.key })).toBe(0);
   });
 });

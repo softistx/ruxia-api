@@ -50,7 +50,7 @@ describe("the in-memory vector index", () => {
     const index = memoryVectorIndex();
     await index.upsert([
       chunk({ text: "mine", vector: [0, 1] }),
-      chunk({ ownerId: "bea", text: "hers", vector: [1, 0] }),
+      chunk({ ownerId: "bea", documentId: "d8", text: "hers", vector: [1, 0] }),
       chunk({
         ownerId: "bea",
         projectId: "p1",
@@ -95,7 +95,7 @@ describe("the in-memory vector index", () => {
     await index.upsert([
       chunk({ ordinal: 0 }),
       chunk({ ordinal: 1 }),
-      chunk({ ownerId: "bea", ordinal: 0 }),
+      chunk({ ownerId: "bea", documentId: "d7", ordinal: 0 }),
       chunk({ documentId: "d2", ordinal: 0 }),
     ]);
     expect(await index.remove({ ownerId: "ada", documentId: "d1" })).toBe(2);

@@ -42,7 +42,9 @@ const PROJECTS = graphql(`
 `);
 const DELETE = graphql(`
   mutation DeleteProject($id: ID!) {
-    deleteProject(id: $id) { id deletedAt purgeAt }
+    deleteProject(id: $id) {
+      id deletedAt purgeAt documentIds personaIds documents { id }
+    }
   }
 `);
 const RESTORE = graphql(`
@@ -155,6 +157,22 @@ describe("projects over /graphql", () => {
       deletedAt: null,
     });
     expect((await client.query(PROJECTS)).data?.projects).toHaveLength(1);
+  });
+
+  test("a deleted project still answers its documents and personas", async () => {
+    const bucket = memoryBucket();
+    const ada = await memberOf(kit, { media: bucket.bucket });
+    const id = String((await ada.projects.create({ name: "P" }))._id);
+    const doc = await uploadDocument(kit, bucket.bucket, ada.id, id, {
+      text: "x",
+    });
+    const deleted = await kit
+      .client(ada.token)
+      .query(DELETE, { variables: { id } });
+    expect(deleted.errors).toBeUndefined();
+    expect(deleted.data?.deleteProject.documentIds).toEqual([String(doc._id)]);
+    expect(deleted.data?.deleteProject.documents).toHaveLength(1);
+    expect(deleted.data?.deleteProject.personaIds).toEqual([]);
   });
 
   test("a project shows its documents and the personas bound to it; a document is deleted and reindexed", async () => {
@@ -334,58 +352,7 @@ describe("projects over /graphql", () => {
   });
 
   test("a run in a project carries its instructions and search_project, and shows citations", async () => {
-    const bucket = memoryBucket();
-    const model = fakeModel([
-      {
-        toolCalls: [
-          { name: "search_project", input: { query: "invoice number" } },
-        ],
-        usage,
-      },
-      { text: "It is 4711.", usage },
-    ]);
-    const ada = await memberOf(kit, {
-      media: bucket.bucket,
-      adapters: adaptersByModel({
-        [sonnet]: model,
-        "claude-haiku-5-5": fakeModel([{ object: { title: "T" }, usage }]),
-      }),
-    });
-    const project = await ada.projects.create({
-      name: "Taxes",
-      instructions: "Answer in one line.",
-    });
-    const projectId = String(project._id);
-    const document = await uploadDocument(
-      kit,
-      bucket.bucket,
-      ada.id,
-      projectId,
-      {
-        text: "The invoice number is 4711.",
-        name: "invoices.md",
-      },
-    );
-    await indexerOf(kit.projects, bucket.bucket).run(
-      String(document._id),
-      { number: 1, of: 3 },
-      signal,
-    );
-    const sage = await ada.personas.create({
-      name: "Sage",
-      defaultModelId: sonnet,
-    });
-    const conversation = await ada.conversations.start({
-      personaId: String(sage._id),
-    });
-    const id = String(conversation._id);
-    await ada.conversations.setProject(id, projectId);
-    const sent = await ada.runs.send({
-      conversationId: id,
-      text: "Which invoice?",
-    });
-    await ada.runtime.settled(sent.runId);
-    await kit.auth.background.settled();
+    const { ada, model, id, projectId, document } = await runInProject();
     const request = model.requests[0];
     expect(JSON.stringify(request?.system)).toContain("Answer in one line.");
     expect(request?.tools?.map((tool) => tool.name)).toEqual([
@@ -417,3 +384,55 @@ describe("projects over /graphql", () => {
     ).toBe(true);
   });
 });
+
+// A member whose conversation is in a project with one indexed document, and
+// whose model searches it, then answers.
+async function runInProject() {
+  const bucket = memoryBucket();
+  const model = fakeModel([
+    {
+      toolCalls: [
+        { name: "search_project", input: { query: "invoice number" } },
+      ],
+      usage,
+    },
+    { text: "It is 4711.", usage },
+  ]);
+  const ada = await memberOf(kit, {
+    media: bucket.bucket,
+    adapters: adaptersByModel({
+      [sonnet]: model,
+      "claude-haiku-5-5": fakeModel([{ object: { title: "T" }, usage }]),
+    }),
+  });
+  const project = await ada.projects.create({
+    name: "Taxes",
+    instructions: "Answer in one line.",
+  });
+  const projectId = String(project._id);
+  const document = await uploadDocument(kit, bucket.bucket, ada.id, projectId, {
+    text: "The invoice number is 4711.",
+    name: "invoices.md",
+  });
+  await indexerOf(kit.projects, bucket.bucket).run(
+    String(document._id),
+    { number: 1, of: 3 },
+    signal,
+  );
+  const sage = await ada.personas.create({
+    name: "Sage",
+    defaultModelId: sonnet,
+  });
+  const conversation = await ada.conversations.start({
+    personaId: String(sage._id),
+  });
+  const id = String(conversation._id);
+  await ada.conversations.setProject(id, projectId);
+  const sent = await ada.runs.send({
+    conversationId: id,
+    text: "Which invoice?",
+  });
+  await ada.runtime.settled(sent.runId);
+  await kit.auth.background.settled();
+  return { ada, model, id, projectId, document };
+}

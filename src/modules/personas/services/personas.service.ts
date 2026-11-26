@@ -345,12 +345,21 @@ export class PersonasService {
 
   // The ids of the viewer's own personas bound to a project.
   async boundTo(projectId: string): Promise<string[]> {
+    return (await this.boundToAll([projectId]))[0] ?? [];
+  }
+
+  // The same for several projects at once, for the loaders: one read.
+  async boundToAll(projectIds: readonly string[]): Promise<string[][]> {
     const bound = await this.personas.findMany({
-      filter: { ownerId: this.actor, projectIds: projectId },
+      filter: { ownerId: this.actor, projectIds: { $in: [...projectIds] } },
       sort: { updatedAt: -1, _id: -1 },
-      limit: 200,
+      limit: 500,
     });
-    return bound.map((persona) => String(persona._id));
+    return projectIds.map((id) =>
+      bound
+        .filter((persona) => persona.projectIds.includes(id))
+        .map((persona) => String(persona._id)),
+    );
   }
 
   private async page(

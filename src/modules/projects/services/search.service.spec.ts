@@ -56,7 +56,7 @@ describe("ProjectSearchService.search", () => {
       signal,
     );
     expect(found[0]).toMatchObject({ name: "invoices.md" });
-    expect(found[0]?.snippet).toContain("4711");
+    expect(found[0]?.text).toContain("4711");
     expect(found[0]?.score).toBeGreaterThan(found[1]?.score ?? 1);
     expect(kit.projects.calls.at(-1)?.[0]).toBe(
       "search_query: invoice number paid",
@@ -125,6 +125,22 @@ describe("ProjectSearchService.search", () => {
         signal,
       ),
     ).toEqual([]);
+  });
+
+  test("a document that is not INDEXED is not cited, whatever chunks it left", async () => {
+    const kit = authApp();
+    const { ada, make } = await member(kit);
+    const id = await make("P", { "a.md": "some words here" });
+    expect(
+      await ada.projectSearch.search([id], "some words", signal),
+    ).toHaveLength(1);
+    await appMongo.db.projectDocuments.raw.updateMany(
+      { ownerId: ada.id },
+      { $set: { status: "failed", errorCode: "INDEXING_FAILED" } },
+    );
+    expect(await ada.projectSearch.search([id], "some words", signal)).toEqual(
+      [],
+    );
   });
 
   test("a deleted project is not searched, and nothing is embedded for it", async () => {
@@ -306,6 +322,40 @@ describe("search_project in the real loop", () => {
     expect(
       events.filter((event) => event.type === "proposed-action"),
     ).toHaveLength(1);
+  });
+
+  test("a passage past character 400 reaches the model whole", async () => {
+    const kit = authApp();
+    const bucket = memoryBucket();
+    const { ada, make } = await member(kit, bucket);
+    const long = `${"filler words about taxes ".repeat(30)} the vault code is 8812 end`;
+    const id = await make("Long", { "long.md": long });
+    const persona = await ada.personas.create({
+      name: "Sage",
+      defaultModelId: sonnet,
+    });
+    const given = await ada.projectSearch.kit({ projectId: id }, persona);
+    const run = runAgent({
+      model: fakeModel([
+        {
+          toolCalls: [
+            { name: "search_project", input: { query: "vault code" } },
+          ],
+        },
+        { text: "done" },
+      ]),
+      messages: [{ role: "user", parts: [{ type: "text", text: "go" }] }],
+      tools: given.tools,
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of run) events.push(event);
+    const [result] = results(events);
+    expect(long.indexOf("8812")).toBeGreaterThan(400);
+    expect(JSON.stringify((result as { output: unknown }).output)).toContain(
+      "8812",
+    );
+    const [shown] = citationsOf(result as never);
+    expect(shown?.snippet).not.toContain("8812");
   });
 
   test("a failed search is a tool error that names its code only", async () => {

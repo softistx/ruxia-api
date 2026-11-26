@@ -1,5 +1,5 @@
+import type { AnyBulkWriteOperation, Document, Filter } from "mongodb";
 import { ObjectId } from "mongodb";
-import type { ChunkDocument } from "./models";
 import { EMBEDDING_DIMENSIONS } from "./models";
 import type {
   VectorChunk,
@@ -49,25 +49,85 @@ export const vectorFilter = (scope: {
 // How many candidates the engine considers per result wanted.
 const CANDIDATES_PER_RESULT = 20;
 
-// The slice of a collection the index uses, so a spec can stand in for it.
+// A chunk as the collection stores it.
+type ChunkRow = {
+  _id: ObjectId;
+  ownerId: string;
+  projectId: ObjectId;
+  documentId: ObjectId;
+  ordinal: number;
+  text: string;
+  embedding: number[];
+};
+
+// The slice of the driver's collection the index uses, typed by the driver's
+// own parameter types: `chunks.raw` is assignable to it without a cast, and a
+// spec stands in for it.
 export interface ChunkStore {
   bulkWrite(
-    operations: readonly {
-      replaceOne: {
-        filter: object;
-        replacement: object;
-        upsert: boolean;
-      };
-    }[],
+    operations: readonly AnyBulkWriteOperation<ChunkRow>[],
   ): Promise<unknown>;
-  deleteMany(filter: object): Promise<{ deletedCount: number }>;
-  aggregate(pipeline: object[]): { toArray(): Promise<unknown[]> };
+  deleteMany(filter: Filter<ChunkRow>): Promise<{ deletedCount: number }>;
+  aggregate(pipeline: Document[]): { toArray(): Promise<Document[]> };
 }
 
-type Row = Pick<
-  ChunkDocument,
-  "ownerId" | "projectId" | "documentId" | "ordinal" | "text"
-> & { score: number };
+type Row = {
+  ownerId: string;
+  projectId: ObjectId;
+  documentId: ObjectId;
+  ordinal: number;
+  text: string;
+  score: number;
+};
+
+// A chunk as stored: the owner and project as the vector index filters them.
+const stored = (chunk: VectorChunk) => ({
+  ownerId: chunk.ownerId,
+  projectId: new ObjectId(chunk.projectId),
+  documentId: new ObjectId(chunk.documentId),
+  ordinal: chunk.ordinal,
+  text: chunk.text,
+  embedding: chunk.vector,
+});
+
+// The `$vectorSearch` pipeline of a query, pre-filtered by `vectorFilter`.
+const searchPipeline = (query: VectorQuery): Document[] => [
+  {
+    $vectorSearch: {
+      index: VECTOR_INDEX_NAME,
+      path: "embedding",
+      queryVector: query.vector,
+      numCandidates: query.limit * CANDIDATES_PER_RESULT,
+      limit: query.limit,
+      filter: vectorFilter({
+        ownerId: query.ownerId,
+        projectId: new ObjectId(query.projectId),
+      }),
+    },
+  },
+  {
+    $project: {
+      _id: 0,
+      ownerId: 1,
+      projectId: 1,
+      documentId: 1,
+      ordinal: 1,
+      text: 1,
+      score: { $meta: "vectorSearchScore" },
+    },
+  },
+];
+
+// The filter of a removal: always the owner, then a project or a document.
+const removalFilter = (scope: VectorScope): Filter<ChunkRow> => ({
+  ownerId: scope.ownerId,
+  ...(scope.projectId !== undefined && {
+    projectId: new ObjectId(scope.projectId),
+  }),
+  ...(scope.documentId !== undefined && {
+    documentId: new ObjectId(scope.documentId),
+  }),
+});
 
 // The production index over `chunks`: writes by (document, ordinal), removes by
 // owner (and project or document), searches with `$vectorSearch` pre-filtered
@@ -75,70 +135,29 @@ type Row = Pick<
 // project's is dropped anyway: the filter is the rule, this is the belt.
 export function mongoVectorIndex(chunks: ChunkStore): VectorIndex {
   return {
-    async upsert(batch: readonly VectorChunk[]) {
+    async upsert(batch) {
       if (batch.length === 0) return;
-      await chunks.bulkWrite(
-        batch.map((chunk) => {
-          const document = {
-            ownerId: chunk.ownerId,
-            projectId: new ObjectId(chunk.projectId),
-            documentId: new ObjectId(chunk.documentId),
-            ordinal: chunk.ordinal,
-            text: chunk.text,
-            embedding: chunk.vector,
-          };
-          return {
-            replaceOne: {
-              filter: {
-                documentId: document.documentId,
-                ordinal: chunk.ordinal,
-              },
-              replacement: document,
-              upsert: true,
+      const operations: AnyBulkWriteOperation<ChunkRow>[] = batch.map(
+        (chunk) => ({
+          replaceOne: {
+            filter: {
+              documentId: new ObjectId(chunk.documentId),
+              ordinal: chunk.ordinal,
             },
-          };
+            replacement: stored(chunk),
+            upsert: true,
+          },
         }),
       );
+      await chunks.bulkWrite(operations);
     },
-    async remove(scope: VectorScope) {
-      const done = await chunks.deleteMany({
-        ownerId: scope.ownerId,
-        ...(scope.projectId !== undefined && {
-          projectId: new ObjectId(scope.projectId),
-        }),
-        ...(scope.documentId !== undefined && {
-          documentId: new ObjectId(scope.documentId),
-        }),
-      });
-      return done.deletedCount;
+    async remove(scope) {
+      return (await chunks.deleteMany(removalFilter(scope))).deletedCount;
     },
-    async search(query: VectorQuery): Promise<VectorHit[]> {
-      const projectId = new ObjectId(query.projectId);
+    async search(query): Promise<VectorHit[]> {
       const rows = (await chunks
-        .aggregate([
-          {
-            $vectorSearch: {
-              index: VECTOR_INDEX_NAME,
-              path: "embedding",
-              queryVector: query.vector,
-              numCandidates: query.limit * CANDIDATES_PER_RESULT,
-              limit: query.limit,
-              filter: vectorFilter({ ownerId: query.ownerId, projectId }),
-            },
-          },
-          {
-            $project: {
-              _id: 0,
-              ownerId: 1,
-              projectId: 1,
-              documentId: 1,
-              ordinal: 1,
-              text: 1,
-              score: { $meta: "vectorSearchScore" },
-            },
-          },
-        ])
-        .toArray()) as Row[];
+        .aggregate(searchPipeline(query))
+        .toArray()) as unknown as Row[];
       return rows
         .filter(
           (row) =>
@@ -157,17 +176,38 @@ export function mongoVectorIndex(chunks: ChunkStore): VectorIndex {
 
 // The slice of a collection `ensureVectorIndex` uses.
 export interface SearchIndexes {
-  listSearchIndexes(name: string): { toArray(): Promise<unknown[]> };
+  listSearchIndexes(name: string): {
+    toArray(): Promise<{ latestDefinition?: unknown }[] | unknown[]>;
+  };
   createSearchIndex(definition: object): Promise<unknown>;
+  updateSearchIndex(name: string, definition: object): Promise<unknown>;
 }
 
-// Creates the vector index when it is not there (idempotent). Needs the search
-// component (`mongot`) behind the replica set: without it the driver's call
-// fails, and the error is the caller's to log or raise (the deployment step
-// raises, the dev boot warns). Answers whether it created one.
-export async function ensureVectorIndex(chunks: SearchIndexes) {
-  const present = await chunks.listSearchIndexes(VECTOR_INDEX_NAME).toArray();
-  if (present.length > 0) return false;
-  await chunks.createSearchIndex(vectorIndexDefinition);
-  return true;
+// Whether the index a server holds has the definition we want (its fields, in
+// order).
+const sameDefinition = (held: unknown) =>
+  JSON.stringify((held as { fields?: unknown } | undefined)?.fields) ===
+  JSON.stringify(vectorIndexDefinition.definition.fields);
+
+// Makes the vector index what `vectorIndexDefinition` says: created when it is
+// not there, updated when its definition differs, left alone otherwise.
+// Needs the search component (`mongot`) behind the replica set: without it the
+// driver's call fails, and the error is the caller's to log or raise (the
+// deployment step raises, the dev boot warns).
+export async function ensureVectorIndex(
+  chunks: SearchIndexes,
+): Promise<"created" | "updated" | "unchanged"> {
+  const [present] = (await chunks
+    .listSearchIndexes(VECTOR_INDEX_NAME)
+    .toArray()) as { latestDefinition?: unknown }[];
+  if (present === undefined) {
+    await chunks.createSearchIndex(vectorIndexDefinition);
+    return "created";
+  }
+  if (sameDefinition(present.latestDefinition)) return "unchanged";
+  await chunks.updateSearchIndex(
+    VECTOR_INDEX_NAME,
+    vectorIndexDefinition.definition,
+  );
+  return "updated";
 }

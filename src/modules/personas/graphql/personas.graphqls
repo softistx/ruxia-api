@@ -53,9 +53,9 @@ type Persona {
   personality: String!
   "The model a new conversation with it starts on."
   defaultModelId: String!
-  "What it may use."
+  "What it may use. `mcpServerIds` is empty for anyone but its owner."
   tools: PersonaTools!
-  "Ids of the projects it may read (stored as given, not looked up yet)."
+  "Ids of the owner's projects it is bound to (each is the owner's own live project when it is set). Empty for anyone but its owner: a TEAM persona does not tell its owner's projects."
   projectIds: [String!]!
   "The voice it speaks with (stored as given, not looked up yet); null for none."
   voiceId: String

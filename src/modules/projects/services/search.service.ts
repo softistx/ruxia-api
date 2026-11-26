@@ -9,12 +9,7 @@ import {
   TOP_CHUNKS,
 } from "../projects.rules";
 import { searchProjectTool } from "../projects.tools";
-import {
-  asQuery,
-  type Citation,
-  roundedScore,
-  snippetOf,
-} from "../projects.utils";
+import { asQuery, type Passage, roundedScore } from "../projects.utils";
 import type { VectorHit, VectorIndex } from "../projects.vector";
 import type { ProjectsService } from "./projects.service";
 
@@ -45,13 +40,14 @@ export class ProjectSearchService {
   }
 
   // The best passages of the given projects (at most 6 in all), best first,
-  // each with the name of its document. A project that is not the member's
+  // each whole, with the name of its document (a document that is not INDEXED
+  // is left out). A project that is not the member's
   // live one is skipped.
   async search(
     projectIds: readonly string[],
     query: string,
     signal: AbortSignal,
-  ): Promise<Citation[]> {
+  ): Promise<Passage[]> {
     const projects = await this.projects.live(projectIds);
     if (projects.length === 0) return [];
     const [vector] = await this.deps.embedder.embed([asQuery(query)], signal);
@@ -73,12 +69,13 @@ export class ProjectSearchService {
     return this.cited(best);
   }
 
-  private async cited(hits: readonly VectorHit[]): Promise<Citation[]> {
+  private async cited(hits: readonly VectorHit[]): Promise<Passage[]> {
     const ids = [...new Set(hits.map((hit) => hit.documentId))];
     const documents = await this.deps.mongo.db.projectDocuments.raw
       .find({
         _id: { $in: ids.map((id) => new ObjectId(id)) },
         ownerId: this.actor,
+        status: "indexed",
       })
       .toArray();
     const names = new Map(documents.map((d) => [String(d._id), d.name]));
@@ -89,7 +86,7 @@ export class ProjectSearchService {
         {
           documentId: hit.documentId,
           name,
-          snippet: snippetOf(hit.text),
+          text: hit.text,
           score: roundedScore(hit.score),
         },
       ];

@@ -14,20 +14,28 @@ export function snippetOf(text: string, limit = SNIPPET_CHARS) {
   return `${(space > limit / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
-// A search result as the tool returns it and the citation shows it.
-export const citation = z.object({
+// A search result as the tool returns it: the whole passage, for the model.
+export const passage = z.object({
   documentId: z.string(),
   name: z.string(),
-  snippet: z.string(),
+  text: z.string(),
   score: z.number(),
 });
-export type Citation = z.infer<typeof citation>;
+export type Passage = z.infer<typeof passage>;
 
-const toolOutput = z.object({ results: z.array(citation) });
+// What a message shows of a passage: its start, as a citation.
+export type Citation = {
+  documentId: string;
+  name: string;
+  snippet: string;
+  score: number;
+};
+
+const toolOutput = z.object({ results: z.array(passage) });
 
 // What `search_project` returns to the model: the passages, with a notice that
 // they are data.
-export const resultOf = (results: readonly Citation[]) => ({
+export const resultOf = (results: readonly Passage[]) => ({
   notice: RESULT_NOTICE,
   results,
 });
@@ -43,7 +51,11 @@ export function citationsOf(part: {
   if (part.type !== "tool-result" || part.name !== "search_project") return [];
   if (part.isError === true) return [];
   const parsed = toolOutput.safeParse(part.output);
-  return parsed.success ? parsed.data.results : [];
+  if (!parsed.success) return [];
+  return parsed.data.results.map(({ text, ...rest }) => ({
+    ...rest,
+    snippet: snippetOf(text),
+  }));
 }
 
 // A score as shown: three decimals.

@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import type { AppMongo } from "../../config/db";
-import { boundedUtf8 } from "../attachments/attachments.utils";
+import { boundedUtf8 } from "../../shared/text";
 import { chunkText } from "./projects.chunking.utils";
 import { EmbeddingsUnavailable } from "./projects.embedder";
 import type { ProjectEmbedder, ProjectFiles } from "./projects.integrity";
@@ -8,9 +8,11 @@ import { pdfType, projectDocumentPlace } from "./projects.media";
 import { asDocument, EMBED_BATCH } from "./projects.utils";
 import type { VectorIndex } from "./projects.vector";
 
-// The most characters of a document that are indexed (about 500 000 tokens);
-// the rest of a longer one is left out.
-export const INDEX_CHARS = 2_000_000;
+// The most characters of a document that are indexed: the first 400 000 (about
+// 140 chunks, or 100 000 tokens), so that the embeddings fit the queue's
+// 10 minute timeout on a small CPU server. The rest of a longer file is not
+// searchable.
+export const INDEX_CHARS = 400_000;
 
 // A reason an indexing stops for good, kept as the document's `errorCode`:
 // retrying would give the same answer.
@@ -57,6 +59,9 @@ export class DocumentIndexer {
     try {
       await this.index(documentId, signal);
     } catch (error) {
+      // A shutdown (or the queue's timeout) is not a failure of the document:
+      // the job goes back to the queue when its lease ends.
+      if (signal.aborted) throw error;
       const final =
         error instanceof IndexingFailure || attempt.number >= attempt.of;
       this.ports.log(`indexing attempt ${attempt.number}: ${codeOf(error)}`);
@@ -122,10 +127,26 @@ export class DocumentIndexer {
     return vectors;
   }
 
+  // Ends the document FAILED with no chunk left (a partly written one is not
+  // searched).
   private async fail(documentId: string, errorCode: string) {
-    await this.ports.mongo.db.projectDocuments.raw.updateOne(
-      { _id: new ObjectId(documentId) },
-      { $set: { status: "failed", errorCode, updatedAt: new Date() } },
+    const documents = this.ports.mongo.db.projectDocuments.raw;
+    const document = await documents.findOne({ _id: new ObjectId(documentId) });
+    if (document === null) return;
+    await this.ports.vectors.remove({
+      ownerId: document.ownerId,
+      documentId,
+    });
+    await documents.updateOne(
+      { _id: document._id },
+      {
+        $set: {
+          status: "failed",
+          errorCode,
+          chunkCount: 0,
+          updatedAt: new Date(),
+        },
+      },
     );
   }
 }

@@ -8,7 +8,8 @@ import {
 import type { Viewer } from "../../auth/viewer";
 import type { Throttle } from "../../limits/throttle";
 import { uploadThrottle } from "../../limits/uploads";
-import { cleanName } from "../attachments/attachments.utils";
+import { MiB } from "../../shared/sizes";
+import { cleanName } from "../../shared/text";
 import type { DocumentFiles } from "./services/document-files.service";
 
 // The name of the kind: the URL segment (`/media/project-documents/<key>`) and
@@ -19,8 +20,6 @@ export const projectDocumentsKindName = "project-documents";
 export const projectDocumentPlace = (key: MediaKey | string) => ({
   key: mediaObjectKey(projectDocumentsKindName, key as MediaKey),
 });
-
-export const MiB = 1024 * 1024;
 
 // The types a document may have: text and Markdown are indexed; a PDF is
 // stored and kept FAILED `PDF_TEXT_UNAVAILABLE` until the SDK extracts text
@@ -94,6 +93,9 @@ export async function projectDocumentUploaded(
   { viewer, request }: MediaViewer & { request: Request },
 ) {
   if (viewer === null) throw new Error("an upload needs a viewer");
+  // A body sent with no length is held to its limit only here (413).
+  const limit = maxBytesOf(upload.contentType);
+  if (upload.size > limit) throw new MediaRefusal("too_large", { limit });
   const document = await ports.files
     .add(viewer.id, {
       projectId: request.headers.get("x-project-id") ?? "",

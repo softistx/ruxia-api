@@ -1,5 +1,4 @@
 import type { MediaBucket } from "@softistx/alxia-media";
-import type { ProjectSearchService } from "./services/search.service";
 
 // What the projects need of the other modules and of the outside, as ports the
 // registry passes (never defaulted).
@@ -17,13 +16,3 @@ export interface IndexQueue {
 
 // The bucket calls the projects make: the files of the documents.
 export type ProjectFiles = Pick<MediaBucket, "open" | "delete">;
-
-// What the conversations need of the projects: the tools and the instructions
-// a run takes (`ProjectSearchService.kit`).
-export type ConversationProjects = Pick<ProjectSearchService, "kit">;
-
-// What the personas need of the projects: which of the ids are the member's own
-// live projects (`ProjectsService.owned`).
-export interface PersonaProjects {
-  owned(ids: readonly string[]): Promise<ReadonlySet<string>>;
-}

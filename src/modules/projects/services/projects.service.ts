@@ -138,6 +138,8 @@ export class ProjectsService {
       throw projectNotFound();
     }
     if (found.deletedAt === null) return found;
+    const held = await this.projects.count({ ownerId: this.actor });
+    if (held >= MAX_PROJECTS) throw tooManyProjects();
     const since = new Date(this.now().getTime() - RESTORE_WINDOW_MS);
     const done = await this.projects.raw.updateOne(
       {

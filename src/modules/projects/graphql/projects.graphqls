@@ -15,7 +15,9 @@ A file of a project (spec 4.7): uploaded with `PUT /media/project-documents`
 contentType, size, name, status }`. The file is read at
 `GET /media/project-documents/<key>` by its owner alone. A PDF is stored but
 not searchable yet: it is FAILED with `errorCode` `PDF_TEXT_UNAVAILABLE`, until
-text extraction exists. Never a URL.
+text extraction exists. Only the first 400,000 characters of a text file are
+indexed (about 140 chunks); the rest of a larger file is stored but not
+searchable, and nothing on the document says so. Never a URL.
 """
 type ProjectDocument {
   "The document's id."
@@ -79,8 +81,8 @@ type Project {
 input CreateProjectInput {
   "Its name."
   name: String! @constraint(minLength: 1, maxLength: 80)
-  "What the model is told about it; empty when left out."
-  instructions: String @constraint(maxLength: 8000)
+  "What the model is told about it; empty when left out. At most 4000 characters once trimmed (the field takes 100 more for the whitespace around them): `validation.errors.invalid-input` (field `instructions`, `too-long`) past that."
+  instructions: String @constraint(maxLength: 4100)
 }
 
 """
@@ -90,8 +92,8 @@ What to change of a project. A field left out stays as it is; `name` and
 input UpdateProjectInput {
   "The new name."
   name: String @constraint(minLength: 1, maxLength: 80)
-  "The new instructions; at most 4000 characters once trimmed."
-  instructions: String @constraint(maxLength: 8000)
+  "The new instructions; at most 4000 characters once trimmed (the field takes 100 more for the whitespace around them)."
+  instructions: String @constraint(maxLength: 4100)
   "The version the client read: another write since is 409 `projects.errors.version-conflict`."
   version: Int
 }

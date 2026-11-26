@@ -60,6 +60,19 @@ export class DocumentFiles {
     });
     if (held >= MAX_DOCUMENTS) throw tooManyDocuments();
     const pdf = input.mime === pdfType;
+    const document = await this.record(ownerId, projectId, input, pdf);
+    return pdf ? document : this.enqueued(document);
+  }
+
+  // The record, counted again once written: two uploads can pass the check
+  // together, and the one that puts the project over its cap removes its own
+  // insert.
+  private async record(
+    ownerId: string,
+    projectId: ObjectId,
+    input: { key: string; name: string; mime: string; bytes: number },
+    pdf: boolean,
+  ) {
     const document = await this.mongo.as(ownerId).db.projectDocuments.create({
       ownerId,
       projectId,
@@ -70,7 +83,15 @@ export class DocumentFiles {
       status: pdf ? "failed" : "pending",
       errorCode: pdf ? "PDF_TEXT_UNAVAILABLE" : null,
     });
-    return pdf ? document : this.enqueued(document);
+    const held = await this.mongo.db.projectDocuments.raw.countDocuments({
+      ownerId,
+      projectId,
+    });
+    if (held > MAX_DOCUMENTS) {
+      await this.mongo.db.projectDocuments.raw.deleteOne({ _id: document._id });
+      throw tooManyDocuments();
+    }
+    return document;
   }
 
   private async enqueued<D extends { _id: ObjectId }>(document: D) {

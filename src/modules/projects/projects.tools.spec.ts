@@ -9,7 +9,7 @@ const context = {
   signal: new AbortController().signal,
   callId: "c",
 };
-const cited = { documentId: "d", name: "n.md", snippet: "s", score: 0.5 };
+const cited = { documentId: "d", name: "n.md", text: "s", score: 0.5 };
 
 describe("searchProjectTool", () => {
   test("is a read-only tool that is never proposed", () => {

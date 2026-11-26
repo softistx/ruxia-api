@@ -1,7 +1,6 @@
 import { DOCUMENT_TOKENS, IMAGE_TOKENS } from "@softistx/ai-core";
+import { MiB } from "../../shared/sizes";
 import type { AttachmentKind } from "./attachments.model";
-
-export const MiB = 1024 * 1024;
 
 // The types an upload may have, by kind of attachment.
 export const imageTypes = [
@@ -81,15 +80,6 @@ export function maxBytesOf(type: string) {
 // (every image but a GIF).
 export const isRendered = (type: string) =>
   kindOfType(type) === "image" && type !== gifType;
-
-// A text cut at `limit` characters, never inside a surrogate pair.
-export function boundedText(text: string, limit = TEXT_LIMIT) {
-  if (text.length <= limit) return { text, truncated: false };
-  const cut = text.slice(0, limit);
-  const last = cut.charCodeAt(cut.length - 1);
-  const safe = last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
-  return { text: safe, truncated: true };
-}
 
 // A rough count of what an attachment adds to the context: the SDK's fixed
 // guess for an image, 2000 tokens a page for a PDF (the flat document guess

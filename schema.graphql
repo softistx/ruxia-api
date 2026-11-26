@@ -317,8 +317,10 @@ input CreatePersonaInput {
 
 """The project to create."""
 input CreateProjectInput {
-  """What the model is told about it; empty when left out."""
-  instructions: String @constraint(maxLength: 8000)
+  """
+  What the model is told about it; empty when left out. At most 4000 characters once trimmed (the field takes 100 more for the whitespace around them): `validation.errors.invalid-input` (field `instructions`, `too-long`) past that.
+  """
+  instructions: String @constraint(maxLength: 4100)
   """Its name."""
   name: String! @constraint(minLength: 1, maxLength: 80)
 }
@@ -1637,11 +1639,13 @@ type Persona {
   ownerId: ID!
   """The system prompt: how it behaves and talks."""
   personality: String!
-  """Ids of the projects it may read (stored as given, not looked up yet)."""
+  """
+  Ids of the owner's projects it is bound to (each is the owner's own live project when it is set). Empty for anyone but its owner: a TEAM persona does not tell its owner's projects.
+  """
   projectIds: [String!]!
   """One line that says who it is."""
   tagline: String!
-  """What it may use."""
+  """What it may use. `mcpServerIds` is empty for anyone but its owner."""
   tools: PersonaTools!
   """When it last changed."""
   updatedAt: DateTime!
@@ -1795,7 +1799,9 @@ A file of a project (spec 4.7): uploaded with `PUT /media/project-documents`
 contentType, size, name, status }`. The file is read at
 `GET /media/project-documents/<key>` by its owner alone. A PDF is stored but
 not searchable yet: it is FAILED with `errorCode` `PDF_TEXT_UNAVAILABLE`, until
-text extraction exists. Never a URL.
+text extraction exists. Only the first 400,000 characters of a text file are
+indexed (about 140 chunks); the rest of a larger file is stored but not
+searchable, and nothing on the document says so. Never a URL.
 """
 type ProjectDocument {
   """Its size in bytes."""
@@ -2340,8 +2346,10 @@ What to change of a project. A field left out stays as it is; `name` and
 `instructions` given as null are refused (`validation.errors.required`).
 """
 input UpdateProjectInput {
-  """The new instructions; at most 4000 characters once trimmed."""
-  instructions: String @constraint(maxLength: 8000)
+  """
+  The new instructions; at most 4000 characters once trimmed (the field takes 100 more for the whitespace around them).
+  """
+  instructions: String @constraint(maxLength: 4100)
   """The new name."""
   name: String @constraint(minLength: 1, maxLength: 80)
   """

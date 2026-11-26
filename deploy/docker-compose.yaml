@@ -53,7 +53,7 @@ x-api-env: &api-env
 
 services:
   mongo:
-    image: mongo:8
+    image: mongo:8.3.17
     container_name: ruxia-mongo
     restart: unless-stopped
     init: true
@@ -133,7 +133,7 @@ services:
 
   # The user mongot syncs with (role searchCoordinator), made once: idempotent.
   mongot-user:
-    image: mongo:8
+    image: mongo:8.3.17
     container_name: ruxia-mongot-user
     restart: "no"
     entrypoint:
@@ -155,7 +155,7 @@ services:
           memory: 128M
 
   mongot:
-    image: mongodb/mongodb-community-search:latest
+    image: mongodb/mongodb-community-search:1.79.1
     container_name: ruxia-mongot
     restart: unless-stopped
     networks: [data]
@@ -169,7 +169,9 @@ services:
       mongot-user:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health"]
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/health || wget -q -O /dev/null http://localhost:8080/health
       interval: 30s
       timeout: 5s
       retries: 3
@@ -183,7 +185,7 @@ services:
 
   # The embeddings of the projects' documents: nomic-embed-text, on the CPU.
   ollama-embed:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.18
     container_name: ruxia-ollama-embed
     restart: unless-stopped
     networks: [data, egress]
@@ -202,9 +204,11 @@ services:
           cpus: "2"
           memory: 2G
 
-  # Pulls the model once (a no-op when it is there), then ends.
+  # Pulls the model once (a no-op when it is there), then ends. The API does not
+  # wait for it: a document indexed before the pull ends is FAILED
+  # EMBEDDINGS_UNAVAILABLE or retried, and `reindexProjectDocument` brings it back.
   ollama-pull:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.18
     container_name: ruxia-ollama-pull
     restart: "no"
     entrypoint: ["ollama", "pull", "nomic-embed-text"]
@@ -260,8 +264,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      ollama-pull:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/health"]
       interval: 30s

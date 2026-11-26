@@ -65,9 +65,8 @@ export function similarity(a: readonly number[], b: readonly number[]) {
   return (1 + dot / Math.sqrt(normA * normB)) / 2;
 }
 
-const keyOf = (
-  chunk: Pick<VectorChunk, "ownerId" | "documentId" | "ordinal">,
-) => `${chunk.ownerId}:${chunk.documentId}:${chunk.ordinal}`;
+const keyOf = (chunk: Pick<VectorChunk, "documentId" | "ordinal">) =>
+  `${chunk.documentId}:${chunk.ordinal}`;
 
 // The in-memory index, for the specs: a map by (document, ordinal), searched
 // by brute force. It applies the owner and project filter exactly as the
