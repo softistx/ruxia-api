@@ -40,7 +40,9 @@ export class AttachmentsPurge {
       try {
         await this.media.delete(filePlace(file));
       } catch (error) {
-        this.log(`attachment file not removed: ${(error as Error).name}`);
+        this.log(
+          `attachment file not removed: ${(error as Error).name} ${file.key} ${String(file._id)}`,
+        );
       }
     }
     return removed;

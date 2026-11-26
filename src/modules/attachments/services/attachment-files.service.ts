@@ -11,6 +11,7 @@ export type NewAttachment = {
   name: string;
   extractedText?: string;
   truncated?: boolean;
+  pages?: number;
 };
 
 // The attachment files, for the media routes (`attachments.media.ts`): who
@@ -27,13 +28,14 @@ export class AttachmentFiles {
       ownerId,
       extractedText: null,
       truncated: false,
+      pages: null,
       ...file,
     });
   }
 
-  // Removes a record (the upload that went past the quota).
-  async forget(id: ObjectId) {
-    await this.mongo.db.attachments.raw.deleteOne({ _id: id });
+  // Removes the owner's record (the upload that went past the quota).
+  async forget(ownerId: string, id: ObjectId) {
+    await this.mongo.db.attachments.raw.deleteOne({ _id: id, ownerId });
   }
 
   // How many files `ownerId` holds (the quota's count).

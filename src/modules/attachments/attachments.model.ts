@@ -19,6 +19,8 @@ export const attachmentPart = z.object({
   name: z.string().min(1).max(200),
   mime: z.string().min(1).max(100),
   bytes: z.number().int().min(0),
+  // A PDF's page count (a heuristic, see `PAGE_MARK`).
+  pages: z.number().int().min(1).optional(),
 });
 export type AttachmentPart = z.infer<typeof attachmentPart>;
 
@@ -41,6 +43,7 @@ export const attachments = defineCollection({
     name: z.string().min(1).max(200),
     extractedText: z.string().nullable().default(null),
     truncated: z.boolean().default(false),
+    pages: z.number().int().min(1).nullable().default(null),
     conversationId: objectId().nullable().default(null),
     messageId: objectId().nullable().default(null),
   }),

@@ -15,15 +15,18 @@ import {
   acceptedTypes,
   attachmentQuota,
   FILE_MAX_BYTES,
+  GIF_MAX_SIDE,
+  gifSize,
   gifType,
   IMAGE_MAX_SIDE,
   isRendered,
   kindOfType,
+  MAX_PDF_PAGES,
   maxBytesOf,
   pdfType,
   textTypes,
 } from "./attachments.rules";
-import { boundedUtf8, cleanName } from "./attachments.utils";
+import { boundedUtf8, cleanName, countPages } from "./attachments.utils";
 import type { AttachmentFiles } from "./services/attachment-files.service";
 
 // The name of the kind: the URL segment (`/media/attachments/<key>`) and the
@@ -103,6 +106,37 @@ async function textOf(bucket: Pick<MediaBucket, "open">, key: string) {
   return text;
 }
 
+// The pages of a stored PDF; past 100 the upload is refused 413 (the file is
+// removed), as Claude reads no more.
+async function pagesOf(bucket: Pick<MediaBucket, "open">, key: string) {
+  const opened = await bucket.open(attachmentPlace(key));
+  if (opened === undefined) throw new Error("an upload is not in the bucket");
+  const pages = await countPages(opened.stream);
+  if (pages > MAX_PDF_PAGES) {
+    throw new MediaRefusal("too_large", { params: { pages: MAX_PDF_PAGES } });
+  }
+  return pages;
+}
+
+// A GIF is stored as sent, so its sides are read from its header and held to
+// 2000 px: 413 (the file is removed), as an oversized one.
+async function requireGifWithin(
+  bucket: Pick<MediaBucket, "open">,
+  key: string,
+) {
+  const opened = await bucket.open(attachmentPlace(key));
+  if (opened === undefined) throw new Error("an upload is not in the bucket");
+  const reader = opened.stream.getReader();
+  const first = (await reader.read()).value ?? new Uint8Array();
+  await reader.cancel();
+  const size = gifSize(first);
+  const wide =
+    size !== undefined && Math.max(size.width, size.height) > GIF_MAX_SIDE;
+  if (size === undefined || wide) {
+    throw new MediaRefusal("too_large", { params: { maxSide: GIF_MAX_SIDE } });
+  }
+}
+
 // The size and type of what is stored for an upload: an image's rendition.
 async function storedImage(
   bucket: Pick<MediaBucket, "open">,
@@ -140,6 +174,11 @@ export async function attachmentUploaded(
   if (upload.size > limit) throw new MediaRefusal("too_large", { limit });
   const text =
     kind === "text" ? await textOf(ports.bucket, upload.key) : undefined;
+  if (upload.contentType === gifType) {
+    await requireGifWithin(ports.bucket, upload.key);
+  }
+  const pages =
+    kind === "pdf" ? await pagesOf(ports.bucket, upload.key) : undefined;
   const stored = isRendered(upload.contentType)
     ? await storedImage(ports.bucket, upload)
     : { mime: upload.contentType, bytes: upload.size };
@@ -150,10 +189,11 @@ export async function attachmentUploaded(
       kind,
       ...stored,
       name,
+      ...(pages !== undefined && { pages }),
       ...(text && { extractedText: text.text, truncated: text.truncated }),
     });
     if ((await ports.files.count(viewer.id)) > attachmentQuota) {
-      await ports.files.forget(file._id);
+      await ports.files.forget(viewer.id, file._id);
       throw new MediaRefusal("quota_exceeded", { status: 402 });
     }
     return {

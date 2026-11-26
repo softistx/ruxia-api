@@ -80,6 +80,31 @@ describe("AttachmentsService: reads and removal", () => {
   });
 });
 
+describe("AttachmentsService: orphan cleanup", () => {
+  test("a file the bucket cannot remove is logged with its key and record id", async () => {
+    const logs: string[] = [];
+    const { bucket } = memoryBucket();
+    const failing = {
+      ...bucket,
+      delete: async () => {
+        throw new Error("bucket down");
+      },
+    };
+    const ada = await memberOf(kit, {
+      media: failing as never,
+      warn: (m) => logs.push(m),
+    });
+    const file = await appMongo.as(ada.id).db.attachments.create({
+      ownerId: ada.id,
+      key: crypto.randomUUID(),
+      ...spec,
+    });
+    await ada.attachments.remove(String(file._id));
+    expect(logs[0]).toContain(file.key);
+    expect(logs[0]).toContain(String(file._id));
+  });
+});
+
 describe("AttachmentsService: require", () => {
   test("answers the references of own unlinked files, in order", async () => {
     const { ada, upload } = await setup();
@@ -304,6 +329,93 @@ describe("AttachmentsService: expand", () => {
   });
 });
 
+describe("AttachmentsService: the request's limits", () => {
+  test("21 images leave the oldest as a note", async () => {
+    const { ada, bucket } = await setup();
+    const files = [];
+    for (let i = 0; i < 21; i += 1) {
+      const file = await appMongo.as(ada.id).db.attachments.create({
+        ownerId: ada.id,
+        key: crypto.randomUUID(),
+        kind: "image",
+        mime: "image/webp",
+        bytes: 1,
+        name: `i${i}`,
+      });
+      await bucket.put(filePlace(file), new Uint8Array([1]), {
+        type: "image/webp",
+      });
+      files.push(file);
+    }
+    const out = await ada.attachments.expand(
+      files.map((f) => [refOf(f)]),
+      claude,
+    );
+    expect(out[0]?.[0]).toMatchObject({
+      text: expect.stringContaining("request is too large"),
+    });
+    expect(out.slice(1).every((parts) => parts[0]?.type === "image")).toBe(
+      true,
+    );
+  });
+
+  test("two 60-page PDFs give one document, the newest, and one note", async () => {
+    const { ada, bucket } = await setup();
+    const files = [];
+    for (let i = 0; i < 2; i += 1) {
+      const file = await appMongo.as(ada.id).db.attachments.create({
+        ownerId: ada.id,
+        key: crypto.randomUUID(),
+        kind: "pdf",
+        mime: "application/pdf",
+        bytes: 10,
+        name: `d${i}.pdf`,
+        pages: 60,
+      });
+      await bucket.put(filePlace(file), new Uint8Array([1]), {
+        type: "application/pdf",
+      });
+      files.push(file);
+    }
+    const out = await ada.attachments.expand(
+      files.map((f) => [refOf(f)]),
+      claude,
+    );
+    expect(out.map((parts) => parts[0]?.type)).toEqual(["text", "document"]);
+  });
+
+  test("one file in two messages under pressure keeps its newest occurrence, and is read once", async () => {
+    const { ada, bucket } = await setup();
+    const opened: string[] = [];
+    const counting = {
+      ...bucket,
+      open: async (place: Parameters<typeof bucket.open>[0]) => {
+        opened.push(place.key);
+        return bucket.open(place);
+      },
+    };
+    const reader = await memberOf(kit, { media: counting as never });
+    const file = await appMongo.as(reader.id).db.attachments.create({
+      ownerId: reader.id,
+      key: crypto.randomUUID(),
+      kind: "image",
+      mime: "image/webp",
+      bytes: 12 * 1024 * 1024,
+      name: "big.webp",
+    });
+    await bucket.put(filePlace(file), new Uint8Array([1]), {
+      type: "image/webp",
+    });
+    const out = await reader.attachments.expand(
+      [[refOf(file)], [refOf(file)]],
+      claude,
+    );
+    expect(out.map((parts) => parts[0]?.type)).toEqual(["text", "image"]);
+    expect(opened).toHaveLength(1);
+    expect(ada.id).toBeDefined();
+  });
+});
+
 describe("AttachmentsService: link", () => {
   test("refuses outside a transaction, and when a file was linked meanwhile", async () => {
     const { ada, upload } = await setup();
@@ -313,7 +425,7 @@ describe("AttachmentsService: link", () => {
     const noSession = { db: appMongo.db, session: undefined } as never;
     await expect(
       ada.attachments.link(noSession, parts, conversationId, new ObjectId()),
-    ).rejects.toMatchObject(refused("auth.errors.exhausted"));
+    ).rejects.toThrow("attachments: link needs a transaction");
     await appMongo.db.attachments.raw.updateOne(
       { _id: file._id },
       { $set: { messageId: new ObjectId(), conversationId: new ObjectId() } },

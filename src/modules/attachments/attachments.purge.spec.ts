@@ -116,5 +116,6 @@ describe("AttachmentsPurge", () => {
     await purge.sweepUnlinked(new Date(Date.now() - UNLINKED_TTL_MS));
     expect(await exists(key)).toBeNull();
     expect(logs[0]).toContain("not removed");
+    expect(logs[0]).toContain(key);
   });
 });

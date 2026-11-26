@@ -2,11 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { ObjectId } from "mongodb";
 import { authApp, signedInAccount } from "~/auth";
 import { memberOf, startedBy } from "~/conversations";
-import { memoryBucket, png } from "~/media";
+import { gifOfSize, memoryBucket, pdfWithPages, png } from "~/media";
 import { countingThrottle } from "~/throttle";
 import { appMongo } from "../../config/db";
 import { attachmentUploaded } from "./attachments.media";
-import { attachmentQuota, IMAGE_MAX_BYTES } from "./attachments.rules";
+import {
+  attachmentQuota,
+  GIF_MAX_BYTES,
+  IMAGE_MAX_BYTES,
+} from "./attachments.rules";
 import { AttachmentFiles } from "./services/attachment-files.service";
 
 const origin = "https://ui.ruxia.test/media/attachments";
@@ -118,11 +122,52 @@ describe("the attachments over /media", () => {
     };
     expect(stillBody.contentType).toBe("image/gif");
     expect(objects.has(`attachments/${stillBody.key}`)).toBe(true);
-    const bigGif = new Uint8Array(5 * 1024 * 1024 + 1);
+    const bigGif = new Uint8Array(GIF_MAX_BYTES + 1);
     bigGif.set(gif);
     expect((await upload(kit, ada.token, bigGif, "image/gif")).status).toBe(
       413,
     );
+  });
+
+  test("a GIF over 3 932 160 bytes (4 MiB) or past 2000 px is refused 413, and a GIF within both is taken", async () => {
+    const kit = authApp();
+    const ada = await signedInAccount(kit);
+    const four = new Uint8Array(4 * 1024 * 1024);
+    four.set(gifOfSize(10, 10));
+    expect((await upload(kit, ada.token, four, "image/gif")).status).toBe(413);
+    const wide = gifOfSize(2001, 10);
+    expect((await upload(kit, ada.token, wide, "image/gif")).status).toBe(413);
+    expect(
+      (await upload(kit, ada.token, gifOfSize(10, 2001), "image/gif")).status,
+    ).toBe(413);
+    expect(
+      (await upload(kit, ada.token, gifOfSize(2000, 2000), "image/gif")).status,
+    ).toBe(200);
+  });
+
+  test("a PDF's pages are counted at upload and kept; more than 100 are refused 413", async () => {
+    const { bucket, objects } = memoryBucket();
+    const kit = authApp(undefined, { media: bucket });
+    const ada = await signedInAccount(kit);
+    const ok = await upload(
+      kit,
+      ada.token,
+      pdfWithPages(12),
+      "application/pdf",
+    );
+    expect(ok.status).toBe(200);
+    const { key } = (await ok.json()) as { key: string };
+    expect((await appMongo.db.attachments.findFirst({ key }))?.pages).toBe(12);
+    const before = objects.size;
+    expect(
+      (await upload(kit, ada.token, pdfWithPages(101), "application/pdf"))
+        .status,
+    ).toBe(413);
+    expect(objects.size).toBe(before);
+    expect(
+      (await upload(kit, ada.token, pdfWithPages(100), "application/pdf"))
+        .status,
+    ).toBe(200);
   });
 
   test("the type is sniffed: a PDF or an image that is not one is refused, and so is any other type", async () => {

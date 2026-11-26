@@ -4,7 +4,7 @@ import { isObjectIdString } from "@softistx/mongo";
 import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
-import { exhausted, invalidInput } from "../../../shared/errors";
+import { invalidInput } from "../../../shared/errors";
 import type { Tx } from "../../../shared/tx";
 import {
   attachmentInUse,
@@ -14,6 +14,8 @@ import {
 import { filePlace } from "../attachments.media";
 import type { AttachmentDocument, AttachmentPart } from "../attachments.model";
 import {
+  MAX_IMAGES_PER_REQUEST,
+  MAX_PAGES_PER_REQUEST,
   MAX_PER_MESSAGE,
   READ_CONCURRENCY,
   REQUEST_BYTES_BUDGET,
@@ -85,7 +87,9 @@ export class AttachmentsService {
     try {
       await this.bucket.delete(filePlace(file));
     } catch (error) {
-      this.warn(`attachment file not removed: ${(error as Error).name}`);
+      this.warn(
+        `attachment file not removed: ${(error as Error).name} ${file.key} ${String(file._id)}`,
+      );
     }
     return String(file._id);
   }
@@ -146,7 +150,9 @@ export class AttachmentsService {
     messageId: ObjectId,
   ) {
     if (parts.length === 0) return;
-    if (tx.session === undefined) throw exhausted();
+    if (tx.session === undefined) {
+      throw new Error("attachments: link needs a transaction");
+    }
     const options = { session: tx.session };
     const keys = parts.map((part) => part.key);
     const mine = { key: { $in: keys }, ownerId: this.actor };
@@ -171,10 +177,11 @@ export class AttachmentsService {
 
   // The parts of several messages as the model reads them: every attachment
   // reference becomes what the model can take (see `modelParts`), the other
-  // parts pass through. The files are read from the bucket now, four at a
-  // time, not stored in the messages. One request carries at most
-  // `REQUEST_BYTES_BUDGET` raw bytes of files, newest first: older files past
-  // it become a text note.
+  // parts pass through. The files are read from the bucket now, once each and
+  // four at a time, not stored in the messages. One request carries at most
+  // `REQUEST_BYTES_BUDGET` raw bytes of files, 20 images and 100 PDF pages,
+  // counted per occurrence, newest first: older ones past a limit become a
+  // text note.
   async expand(
     lists: readonly Expandable[],
     reader: Reader,
@@ -199,38 +206,49 @@ export class AttachmentsService {
         async (file) => [file.key, await this.base64(file)] as const,
       ),
     );
+    let occurrence = 0;
     return lists.map((parts) =>
-      parts.flatMap((part) =>
-        isAttachment(part)
-          ? modelParts(part, byKey.get(part.key), reader, {
-              data: loaded.get(part.key),
-              skipped: skipped.has(part.key),
-            })
-          : [part as unknown as Part],
-      ),
+      parts.flatMap((part) => {
+        if (!isAttachment(part)) return [part as unknown as Part];
+        const at = occurrence++;
+        return modelParts(part, byKey.get(part.key), reader, {
+          data: loaded.get(part.key),
+          skipped: skipped.has(at),
+        });
+      }),
     );
   }
 
-  // The files to read, newest first within the request's byte budget, and the
-  // keys the budget left out.
+  // The files to read (each once) and the occurrences, by position among the
+  // request's references, that the limits left out: bytes, images and pages,
+  // newest occurrence first.
   private budgeted(
     refs: readonly AttachmentPart[],
     byKey: ReadonlyMap<string, AttachmentDocument>,
     reader: Reader,
   ) {
-    const read: AttachmentDocument[] = [];
-    const skipped = new Set<string>();
-    let used = 0;
-    for (const ref of refs.toReversed()) {
+    const read = new Map<string, AttachmentDocument>();
+    const skipped = new Set<number>();
+    const used = { bytes: 0, images: 0, pages: 0 };
+    for (let at = refs.length - 1; at >= 0; at -= 1) {
+      const ref = refs[at] as AttachmentPart;
       const file = byKey.get(ref.key);
       if (file === undefined || !needsBytes(ref, reader)) continue;
-      if (used + file.bytes > REQUEST_BYTES_BUDGET) skipped.add(ref.key);
-      else {
-        used += file.bytes;
-        read.push(file);
+      const pages = file.pages ?? 1;
+      const over =
+        used.bytes + file.bytes > REQUEST_BYTES_BUDGET ||
+        (ref.kind === "image" && used.images >= MAX_IMAGES_PER_REQUEST) ||
+        (ref.kind === "pdf" && used.pages + pages > MAX_PAGES_PER_REQUEST);
+      if (over) {
+        skipped.add(at);
+        continue;
       }
+      used.bytes += file.bytes;
+      if (ref.kind === "image") used.images += 1;
+      else used.pages += pages;
+      read.set(file.key, file);
     }
-    return { read, skipped };
+    return { read: [...read.values()], skipped };
   }
 
   // A stored file as base64; undefined when the bucket has no such object.

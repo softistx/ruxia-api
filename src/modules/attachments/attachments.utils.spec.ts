@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { pdfWithPages } from "~/media";
 import type { AttachmentDocument, AttachmentPart } from "./attachments.model";
 import {
   boundedUtf8,
   cleanName,
+  countPages,
   isAttachment,
   mapLimit,
   modelParts,
@@ -215,5 +217,46 @@ describe("boundedUtf8", () => {
     expect(
       await boundedUtf8(streamOf(Uint8Array.of(0x68, 0, 0x69))),
     ).toBeUndefined();
+  });
+});
+
+describe("countPages", () => {
+  const chunks = (bytes: Uint8Array, size: number) =>
+    (async function* () {
+      for (let i = 0; i < bytes.length; i += size)
+        yield bytes.slice(i, i + size);
+    })();
+
+  test("counts the pages of a real small PDF, however its bytes are cut", async () => {
+    const pdf = pdfWithPages(7);
+    for (const size of [pdf.length, 100, 17, 1]) {
+      expect(await countPages(chunks(pdf, size))).toBe(7);
+    }
+  });
+
+  test("a PDF is at least one page, and /Pages is not a page", async () => {
+    expect(
+      await countPages(
+        chunks(new TextEncoder().encode("%PDF-1.4 /Type /Pages"), 5),
+      ),
+    ).toBe(1);
+    expect(await countPages(chunks(pdfWithPages(120), 4096))).toBe(120);
+  });
+});
+
+describe("an image too large to send", () => {
+  test("an image whose base64 passes 5 MiB becomes a note, however it got there", () => {
+    const out = modelParts(
+      part("image", "image/webp"),
+      file({ kind: "image" }),
+      claude,
+      {
+        data: "A".repeat(5 * 1024 * 1024 + 1),
+        skipped: false,
+      },
+    );
+    expect(out[0]).toMatchObject({
+      text: expect.stringContaining("too large to send"),
+    });
   });
 });

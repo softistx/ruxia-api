@@ -5,7 +5,12 @@ import type {
   TextPart,
 } from "@softistx/ai-core";
 import type { AttachmentDocument, AttachmentPart } from "./attachments.model";
-import { boundedText, TEXT_LIMIT } from "./attachments.rules";
+import {
+  boundedText,
+  IMAGE_MAX_BASE64,
+  PAGE_MARK,
+  TEXT_LIMIT,
+} from "./attachments.rules";
 
 // The name a client gave its file (`x-file-name`, percent-encoded), safe to
 // keep and show: no control character, trimmed, 200 characters at most;
@@ -30,6 +35,7 @@ export const partOf = (file: AttachmentDocument): AttachmentPart => ({
   name: file.name,
   mime: file.mime,
   bytes: file.bytes,
+  ...(file.pages !== null && { pages: file.pages }),
 });
 
 // An attachment as text, for what reads text alone (the summary of an older
@@ -117,6 +123,9 @@ export function modelParts(
   if (loaded.data === undefined) {
     return [block(`[Attachment "${part.name}" is no longer available.]`)];
   }
+  if (part.kind === "image" && loaded.data.length > IMAGE_MAX_BASE64) {
+    return [block(`[Image "${part.name}" omitted: it is too large to send.]`)];
+  }
   const source = {
     kind: "base64" as const,
     mediaType: part.mime,
@@ -172,4 +181,26 @@ export async function boundedUtf8(
   }
   const bounded = boundedText(text, limit);
   return { text: bounded.text, truncated: bounded.truncated || more };
+}
+
+// The pages of a PDF read as a stream, bounded: each chunk is scanned as
+// latin1 with the tail of the last one, so a mark split between chunks is
+// found once.
+export async function countPages(stream: AsyncIterable<Uint8Array>) {
+  const tail = 64;
+  const decoder = new TextDecoder("latin1");
+  let carry = "";
+  let pages = 0;
+  const scan = (text: string, until: number) => {
+    for (const match of text.matchAll(PAGE_MARK)) {
+      if (match.index < until) pages += 1;
+    }
+  };
+  for await (const chunk of stream) {
+    const text = carry + decoder.decode(chunk, { stream: true });
+    scan(text, text.length - tail);
+    carry = text.slice(-tail);
+  }
+  scan(carry, carry.length);
+  return Math.max(pages, 1);
 }
