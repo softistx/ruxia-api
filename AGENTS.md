@@ -23,6 +23,10 @@ the server runs (such as `models.probe.ts`) are the `reload` role under another 
   memory or projects; no resolver or script exposes them (a leak spec guards it).
 - **AI through `@softistx/ai-*` only**: no provider SDK, no hand-made SSE writer, no
   app-side embeddings or search client. A gap is filed on softistx/ai and the slice waits.
+- **Transports**: `/graphql` is the entry point; `/media` (the persona avatars) and
+  `GET /runs/:runId/events` (the SSE stream of a run, spec §1 and §4.5) are the transports
+  beside it, through `@softistx/alxia-media` and `@softistx/ai-alxia`. Any other route is
+  asked about first.
 - **Writes by a model are proposed actions** confirmed by the user (MCP, memory).
-- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now` and `titleModelId`; no module defaults a port.
+- **Entry-point defaults**: `createApp` may default `adapters` (the provider seam, `serverModels`), beside `throttle`, `now`, `titleModelId`, `runtime` (the runs' host, one per app), `observers` (`aiTelemetry`, no content) and `heartbeatMs`; no module defaults a port.
 - **CI**: no workflow yet; the local green bar is the proof until one is added.

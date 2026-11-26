@@ -118,11 +118,10 @@ probe, the price table (from upstream; overridable by a migration).
   citations, artifact refs), modelId, usage, cost, status: STREAMING | DONE | FAILED | STOPPED,
   reactions[], pinned, createdAt }`.
 - `sendMessage(conversationId, parentId?, text, attachmentIds[])` starts a run and returns
-  its `runId`; the reply streams at `GET /runs/:runId/events` (SSE through `agentEvents`,
-  with a heartbeat). A run **continues when the client leaves** (a phone locks, a tab
-  closes) and its events are buffered so a reconnect resumes from `Last-Event-ID`; today
-  `agentEvents` stops the run on disconnect, so this waits for the upstream detached run
-  and resumable stream.
+  its `runId`; the reply streams at `GET /runs/:runId/events` (SSE, through ai-alxia's
+  detached runs, with a heartbeat). A run **continues when the client leaves** (a phone
+  locks, a tab closes) and its events are buffered so a reconnect resumes from
+  `Last-Event-ID`.
 - `stopRun(runId)` aborts; the partial reply is kept with `status: STOPPED`.
 - **Edit**: `editMessage(messageId, text)` creates a sibling user message and a new reply
   (a new branch). **Regenerate**: `regenerate(messageId, modelId?)` creates a sibling

@@ -1,9 +1,13 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { fakeModel } from "@softistx/ai-testing";
+import { adaptersByModel, stallingModel } from "~/ai";
 import { authApp, signedInAccount } from "~/auth";
 import { memberOf, sonnet } from "~/conversations";
 import { codeOf } from "~/fixtures";
 import { graphql } from "~/generated/graphql";
+import { framesOf, streamRun } from "~/runs";
 import { appMongo } from "../../config/db";
+import { unthrottled } from "../../limits/throttle";
 
 const CREATE_PERSONA_MUTATION = graphql(`
   mutation ChatCreatePersona($input: CreatePersonaInput!) {
@@ -24,6 +28,23 @@ const START_CONVERSATION_MUTATION = graphql(`
 const SET_CONVERSATION_MODEL_MUTATION = graphql(`
   mutation SetConversationModel($id: ID!, $modelId: String!) {
     setConversationModel(id: $id, modelId: $modelId) { id modelId }
+  }
+`);
+
+const SEND_MESSAGE_MUTATION = graphql(`
+  mutation SendMessage($input: SendMessageInput!) {
+    sendMessage(input: $input) {
+      runId
+      userMessage { id role text status parentId }
+      reply { id role status runId modelId }
+      conversation { id activeRunId activeLeafId }
+    }
+  }
+`);
+
+const STOP_RUN_MUTATION = graphql(`
+  mutation StopRun($runId: ID!) {
+    stopRun(runId: $runId) { id status text errorCode }
   }
 `);
 
@@ -202,5 +223,104 @@ describe("conversations over /graphql", () => {
       variables: { first: 0 },
     });
     expect(codeOf(result)).toBe("validation.errors.invalid-input");
+  });
+});
+
+describe("runs over /graphql and /runs", () => {
+  test("start, send, stream, read the messages, then stop a second run", async () => {
+    const model = fakeModel([
+      { text: "Hello Ada", chunk: 3 },
+      { text: "Second" },
+    ]);
+    const kit = authApp(unthrottled, {
+      adapters: adaptersByModel({
+        [sonnet]: model,
+        "claude-haiku-5-5": fakeModel([{ object: { title: "Greeting" } }]),
+      }),
+    });
+    const ada = await signedInAccount(kit);
+    const client = kit.client(ada.token);
+    const persona = await client.query(CREATE_PERSONA_MUTATION, {
+      variables: { input: { name: "Sage", defaultModelId: sonnet } },
+    });
+    const started = await client.query(START_CONVERSATION_MUTATION, {
+      variables: { input: { personaId: persona.data?.createPersona.id ?? "" } },
+    });
+    const id = started.data?.startConversation.id ?? "";
+    const sent = await client.query(SEND_MESSAGE_MUTATION, {
+      variables: { input: { conversationId: id, text: "Hello" } },
+    });
+    const payload = sent.data?.sendMessage;
+    expect(payload).toMatchObject({
+      userMessage: { role: "USER", text: "Hello", status: "DONE" },
+      reply: { role: "ASSISTANT", status: "STREAMING", modelId: sonnet },
+    });
+    expect(payload?.runId).toBe(payload?.reply.id ?? "");
+    expect(payload?.conversation.activeLeafId).toBe(payload?.reply.id ?? "");
+    const streamed = await streamRun(kit, payload?.runId ?? "", {
+      token: ada.token,
+    });
+    const { frames } = framesOf(await streamed.text());
+    expect(frames.at(-1)?.event).toBe("done");
+    await kit.auth.background.settled();
+    const read = await client.query(CONVERSATION_QUERY, {
+      variables: { id, first: 10 },
+    });
+    expect(
+      read.data?.conversation.messages.edges.map((e) => [
+        e.node.role,
+        e.node.status,
+        e.node.text,
+      ]),
+    ).toEqual([
+      ["ASSISTANT", "DONE", "Hello Ada"],
+      ["USER", "DONE", "Hello"],
+    ]);
+    // A finished run stops as a no-op.
+    const noop = await client.query(STOP_RUN_MUTATION, {
+      variables: { runId: payload?.runId ?? "" },
+    });
+    expect(noop.data?.stopRun).toMatchObject({
+      status: "DONE",
+      text: "Hello Ada",
+    });
+  });
+
+  test("a second send during a run is refused, and stopRun keeps the partial text", async () => {
+    const kit = authApp(unthrottled, {
+      adapters: adaptersByModel({ [sonnet]: stallingModel("Half of") }),
+    });
+    const ada = await signedInAccount(kit);
+    const client = kit.client(ada.token);
+    const persona = await client.query(CREATE_PERSONA_MUTATION, {
+      variables: { input: { name: "Sage", defaultModelId: sonnet } },
+    });
+    const started = await client.query(START_CONVERSATION_MUTATION, {
+      variables: { input: { personaId: persona.data?.createPersona.id ?? "" } },
+    });
+    const id = started.data?.startConversation.id ?? "";
+    const input = { conversationId: id, text: "Hello" };
+    const sent = await client.query(SEND_MESSAGE_MUTATION, {
+      variables: { input },
+    });
+    const again = await client.query(SEND_MESSAGE_MUTATION, {
+      variables: { input },
+    });
+    expect(codeOf(again)).toBe("conversations.errors.run-in-progress");
+    const stopped = await client.query(STOP_RUN_MUTATION, {
+      variables: { runId: sent.data?.sendMessage.runId ?? "" },
+    });
+    expect(stopped.data?.stopRun).toMatchObject({
+      status: "STOPPED",
+      text: "Half of",
+    });
+    const missing = await client.query(STOP_RUN_MUTATION, {
+      variables: { runId: "0123456789abcdef01234567" },
+    });
+    expect(codeOf(missing)).toBe("conversations.errors.run-not-found");
+    const anonymous = await kit.client().query(STOP_RUN_MUTATION, {
+      variables: { runId: "0123456789abcdef01234567" },
+    });
+    expect(codeOf(anonymous)).toBe("auth.errors.unauthenticated");
   });
 });

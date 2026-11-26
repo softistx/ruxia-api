@@ -1,0 +1,17 @@
+import type { Resolvers } from "@/generated/graphql/resolvers";
+import { requireMember } from "../../../auth/guards";
+
+// Guards first: a send and a stop are a member's, and the services read only
+// that member's conversations and runs.
+export const runs: Resolvers = {
+  Mutation: {
+    sendMessage: (_, { input }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.runs.send(input);
+    },
+    stopRun: (_, { runId }, ctx) => {
+      requireMember(ctx);
+      return ctx.services.runs.stop(runId);
+    },
+  },
+};

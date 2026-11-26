@@ -5,8 +5,8 @@ import { fail, retryParams } from "../../shared/errors";
 // The module's refusals (CONTEXT.md lists their codes). `not-found` covers a
 // conversation that does not exist, is deleted, or is another member's: the
 // three look alike on purpose, the admin's included. `invalid-parent` is a
-// field issue on `parentId`; `run-not-found` and `run-in-progress` are the
-// sends' (part 2 raises the first).
+// field issue on `parentId`; `run-in-progress` is the send's and `run-not-found`
+// the stop's and the run stream's.
 export const codes = defineCodes("conversations", [
   "not-found",
   "invalid-cursor",

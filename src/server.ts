@@ -6,6 +6,7 @@ import { appMongo, databaseOf } from "./config/db";
 import { env } from "./config/env";
 import { redis, serverStatuses } from "./config/redis";
 import { MigrationsOutOfSyncError } from "./migrations/status";
+import { sweepRuns } from "./modules/conversations";
 import {
   intervalTicker,
   ModelsProbe,
@@ -43,6 +44,11 @@ try {
   console.error(error.message);
   process.exit(1);
 }
+
+// The runs live in this process: a message a previous one left STREAMING
+// belongs to a run that is gone, and is ended before the first request.
+const interrupted = await sweepRuns(appMongo, () => new Date());
+if (interrupted > 0) console.warn(`${interrupted} interrupted runs ended`);
 
 if (redis === undefined) console.warn("rate limits off: no REDIS_URL");
 

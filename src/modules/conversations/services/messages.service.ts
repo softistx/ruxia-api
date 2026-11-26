@@ -80,6 +80,17 @@ export class MessagesService {
     return [...above.map(({ depth: _, ...message }) => message), rest];
   }
 
+  // The assistant message a run id names (the run's id is the message's), the
+  // viewer's own; undefined for anything else.
+  async ofRun(runId: string): Promise<MessageDocument | undefined> {
+    if (!isObjectIdString(runId)) return undefined;
+    return this.messages.findFirst({
+      _id: runId,
+      ownerId: this.actor,
+      role: "assistant",
+    });
+  }
+
   // A page of the active branch, newest first.
   async page(
     conversation: ConversationDocument,
@@ -182,8 +193,8 @@ export class MessagesService {
   }
 
   // Ends a streaming message, once: false when something else did first. On
-  // success the conversation is released (`activeRunId` null) in the same
-  // transaction.
+  // success the conversation is released (`activeRunId` null, `lastMessageAt`
+  // moved to the end of the answer) in the same transaction.
   async finalise(
     message: Pick<MessageDocument, "_id" | "conversationId">,
     end: Finish,
@@ -219,7 +230,12 @@ export class MessagesService {
               activeRunId: String(message._id),
             },
             {
-              $set: { activeRunId: null, updatedAt: at, updatedBy: this.actor },
+              $set: {
+                activeRunId: null,
+                lastMessageAt: at,
+                updatedAt: at,
+                updatedBy: this.actor,
+              },
               $inc: { version: 1 },
             },
             options,

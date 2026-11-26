@@ -1,3 +1,4 @@
+import type { AgentObserver } from "@softistx/ai-core";
 import DataLoader from "dataloader";
 import type { Auth } from "../auth/auth";
 import type { Viewer } from "../auth/viewer";
@@ -11,9 +12,11 @@ import {
   StepUpService,
 } from "./accounts";
 import {
+  type ConversationsRuntime,
   ConversationsService,
   MessagesService,
   type ModelAdapters,
+  RunsService,
   TitlesService,
 } from "./conversations";
 import { InvitationsService } from "./invitations";
@@ -40,6 +43,9 @@ export function services(deps: {
   statuses: StatusStore;
   adapters: ModelAdapters;
   titleModelId: string;
+  // Where the runs live (one per app) and what watches each of them.
+  runtime: ConversationsRuntime;
+  observers: readonly AgentObserver[];
   now: () => Date;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
@@ -56,6 +62,22 @@ export function services(deps: {
     new AvatarsService(appMongo),
     deps.viewer,
     (id) => owners.load(id),
+  );
+  const conversations = new ConversationsService(
+    appMongo,
+    modelCatalogue,
+    personas,
+    deps.viewer,
+    deps.now,
+  );
+  const messages = new MessagesService(appMongo, deps.viewer, deps.now);
+  const titles = new TitlesService(
+    appMongo,
+    modelCatalogue,
+    deps.adapters,
+    deps.titleModelId,
+    (message) => statusWarning("titles", message),
+    deps.now,
   );
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
@@ -78,21 +100,25 @@ export function services(deps: {
     ),
     models: modelCatalogue,
     personas,
-    conversations: new ConversationsService(
-      appMongo,
-      modelCatalogue,
-      personas,
+    conversations,
+    messages,
+    titles,
+    runs: new RunsService(
+      {
+        conversations,
+        messages,
+        titles,
+        models: modelCatalogue,
+        personas,
+        adapters: deps.adapters,
+        runtime: deps.runtime,
+        observers: deps.observers,
+        background: deps.auth.background,
+        sends: deps.throttle.sends,
+        warn: (message) => statusWarning("runs", message),
+        now: deps.now,
+      },
       deps.viewer,
-      deps.now,
-    ),
-    messages: new MessagesService(appMongo, deps.viewer, deps.now),
-    titles: new TitlesService(
-      appMongo,
-      modelCatalogue,
-      deps.adapters,
-      deps.titleModelId,
-      (message) => statusWarning("titles", message),
-      deps.now,
     ),
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),

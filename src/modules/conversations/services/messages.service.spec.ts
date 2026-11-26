@@ -305,6 +305,27 @@ describe("MessagesService: an exchange", () => {
     expect(read).toMatchObject({ status: "done", finishReason: "end" });
     expect((await ada.conversations.find(id)).activeRunId).toBeNull();
   });
+
+  test("the end moves lastMessageAt, and a run id names the owner's assistant message", async () => {
+    const at = new Date("2030-01-01T00:00:00Z");
+    const ada = await memberOf(kit, { now: () => at });
+    const bea = await memberOf(kit);
+    const id = await started(ada);
+    const conversation = await ada.conversations.find(id);
+    const { user, assistant } = await ada.messages.insertExchange({
+      conversation,
+      parentId: null,
+      text: "hello",
+      modelId: sonnet,
+    });
+    await ada.messages.finalise(assistant, finish);
+    expect((await ada.conversations.find(id)).lastMessageAt).toEqual(at);
+    const runId = String(assistant._id);
+    expect((await ada.messages.ofRun(runId))?._id).toEqual(assistant._id);
+    expect(await ada.messages.ofRun(String(user._id))).toBeUndefined();
+    expect(await bea.messages.ofRun(runId)).toBeUndefined();
+    expect(await ada.messages.ofRun("not an id")).toBeUndefined();
+  });
 });
 
 describe("MessagesService: the context", () => {

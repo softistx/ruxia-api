@@ -1,6 +1,5 @@
-import type { ModelAdapter } from "@softistx/ai-core";
+import type { AgentObserver, ModelAdapter } from "@softistx/ai-core";
 import { fakeModel, type Script } from "@softistx/ai-testing";
-import type { ModelAdapters } from "../src/modules/conversations";
 
 // Adapters for specs: every model answers with the same scripted fake (an
 // empty script by default, which fails any call), so no provider is reached.
@@ -19,9 +18,14 @@ export function fakeAdapters(script: Script = []): ModelAdapters & {
 }
 
 import { appMongo } from "../src/config/db";
+import { type Throttle, unthrottled } from "../src/limits/throttle";
 import {
+  type ConversationsRuntime,
   ConversationsService,
   MessagesService,
+  type ModelAdapters,
+  RunsService,
+  TitlesService,
 } from "../src/modules/conversations";
 import { ModelsService, noStatuses } from "../src/modules/models";
 import { AvatarsService, PersonasService } from "../src/modules/personas";
@@ -34,7 +38,20 @@ export const sonnet = "claude-sonnet-5-5";
 
 export async function memberOf(
   kit: ReturnType<typeof authApp>,
-  options: { role?: "admin" | "member"; name?: string; now?: () => Date } = {},
+  options: {
+    role?: "admin" | "member";
+    name?: string;
+    now?: () => Date;
+    // The models the runs call (no scripted answer by default).
+    adapters?: ModelAdapters;
+    // The runs' host (the kit's by default: `kit.runtime`).
+    runtime?: ConversationsRuntime;
+    sends?: Throttle["sends"];
+    // The cheap model that titles, a catalogue id.
+    titleModelId?: string;
+    observers?: readonly AgentObserver[];
+    warn?: (message: string) => void;
+  } = {},
 ) {
   const account = await signedInAccount(kit, options);
   const viewer = await sessionViewer(kit, account.token);
@@ -47,17 +64,49 @@ export async function memberOf(
     async (id) => ({ id, name: options.name ?? "Ada" }),
   );
   const now = options.now ?? (() => new Date());
+  const conversations = new ConversationsService(
+    appMongo,
+    models,
+    personas,
+    viewer,
+    now,
+  );
+  const messages = new MessagesService(appMongo, viewer, now);
+  const adapters = options.adapters ?? kit.adapters;
+  const warn = options.warn ?? (() => {});
+  const titles = new TitlesService(
+    appMongo,
+    models,
+    adapters,
+    options.titleModelId ?? "claude-haiku-5-5",
+    warn,
+    now,
+  );
+  const runtime = options.runtime ?? kit.runtime;
   return {
     id: account.userId,
     token: account.token,
     personas,
-    conversations: new ConversationsService(
-      appMongo,
-      models,
-      personas,
+    conversations,
+    messages,
+    titles,
+    runtime,
+    runs: new RunsService(
+      {
+        conversations,
+        messages,
+        titles,
+        models,
+        personas,
+        adapters,
+        runtime,
+        observers: options.observers ?? [],
+        background: kit.auth.background,
+        sends: options.sends ?? unthrottled.sends,
+        warn,
+        now,
+      },
       viewer,
-      now,
     ),
-    messages: new MessagesService(appMongo, viewer, now),
   };
 }

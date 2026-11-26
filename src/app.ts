@@ -1,3 +1,5 @@
+import type { AgentObserver } from "@softistx/ai-core";
+import { aiTelemetry } from "@softistx/ai-telemetry";
 import { health } from "@softistx/alxia";
 import { graphql, type ServerContext } from "@softistx/alxia-graphql";
 import type { MediaBucket } from "@softistx/alxia-media";
@@ -18,7 +20,13 @@ import { clientHeader } from "./http/csrf";
 import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
-import type { ModelAdapters } from "./modules/conversations";
+import {
+  type ConversationsRuntime,
+  conversationsRuntime,
+  HEARTBEAT_MS,
+  type ModelAdapters,
+  runEvents,
+} from "./modules/conversations";
 import type { StatusStore } from "./modules/models";
 import { AvatarsService, avatarRoutes } from "./modules/personas";
 import { type Services, services } from "./modules/services";
@@ -88,6 +96,13 @@ export function createApp(
     now?: () => Date;
     // The cheap model that titles conversations: `TITLE_MODEL_ID` by default.
     titleModelId?: string;
+    // Where the runs live: one per app, built here by default. A spec gives its
+    // own to wait for a run (`settled`).
+    runtime?: ConversationsRuntime;
+    // What watches every run: `aiTelemetry` without the content by default.
+    observers?: readonly AgentObserver[];
+    // How long a quiet run stream waits before a heartbeat comment (ms).
+    heartbeatMs?: number;
     // The private bucket of the media routes: `S3_*`'s by default.
     media?: MediaBucket;
     catalogues?: () => boolean;
@@ -100,6 +115,10 @@ export function createApp(
   const adapters = options.adapters ?? serverModels;
   const now = options.now ?? (() => new Date());
   const titleModelId = options.titleModelId ?? env.TITLE_MODEL_ID;
+  const runtime = options.runtime ?? conversationsRuntime();
+  const observers = options.observers ?? [
+    aiTelemetry({ recordContent: false }),
+  ];
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
   const servicesOf = (
     viewer: Viewer | null,
@@ -115,6 +134,8 @@ export function createApp(
       statuses,
       adapters,
       titleModelId,
+      runtime,
+      observers,
       now,
     });
   return (
@@ -123,6 +144,9 @@ export function createApp(
       resolveViewer: options.resolveViewer ?? janusViewer(auth),
     })
       .plugin(probes(cataloguesReady))
+      // The answers being written, beside /graphql: the same viewer and client
+      // header, the events of a run a client follows and resumes.
+      .plugin(runEvents(runtime, options.heartbeatMs ?? HEARTBEAT_MS))
       // The files, beside /graphql: the viewer is resolved above, the kinds'
       // callbacks read it. Mounted before the body limit, which is /graphql's.
       .plugin(
@@ -136,6 +160,9 @@ export function createApp(
       .bodyLimit(BODY_LIMIT)
       .plugin((app) => graphqlRoute(app, auth, servicesOf))
       .onStop(async () => {
+        // The runs end first (FAILED `INTERRUPTED`, written before the
+        // database closes); the open streams have ended with the shutdown.
+        await runtime.abortAll();
         await closeDatabases();
         await redis?.close();
       })

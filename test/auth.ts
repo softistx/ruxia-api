@@ -1,3 +1,4 @@
+import type { AgentObserver } from "@softistx/ai-core";
 import { graphqlClient } from "@softistx/alxia-graphql/testing";
 import type { MediaBucket } from "@softistx/alxia-media";
 import { fixedClock, scryptHasher } from "@softistx/janus";
@@ -11,9 +12,15 @@ import { appMongo, databaseOf } from "../src/config/db";
 import { env } from "../src/config/env";
 import { clientHeader } from "../src/http/csrf";
 import { type Throttle, unthrottled } from "../src/limits/throttle";
+import {
+  type ConversationsRuntime,
+  conversationsRuntime,
+  type ModelAdapters,
+} from "../src/modules/conversations";
 import { memberJoiner } from "../src/modules/members/members.joiner";
 import { noStatuses, type StatusStore } from "../src/modules/models";
 import { background } from "../src/shared/background";
+import { fakeAdapters } from "./conversations";
 import { memoryBucket } from "./media";
 
 export const uiOrigin = "https://ui.ruxia.test";
@@ -38,6 +45,11 @@ export function authApp(
     startAt = Date.now(),
     statuses,
     media = memoryBucket().bucket,
+    adapters = fakeAdapters(),
+    runtime = conversationsRuntime(),
+    observers = [],
+    heartbeatMs,
+    now,
   }: {
     // Where the fixed clock starts (the real now by default): a spec about a
     // fixed window starts it inside one, so moving the clock cannot cross it.
@@ -46,6 +58,15 @@ export function authApp(
     statuses?: StatusStore;
     // The bucket of the media routes (a memory one by default).
     media?: MediaBucket;
+    // The provider adapters the runs call: an unscripted fake by default (any
+    // call fails), so no provider is reached; a spec that sends scripts it.
+    adapters?: ModelAdapters;
+    // The runs' host, to wait for a run (`runtime.settled(runId)`); no
+    // observers by default.
+    runtime?: ConversationsRuntime;
+    observers?: readonly AgentObserver[];
+    heartbeatMs?: number;
+    now?: () => Date;
   } = {},
 ) {
   const clock = fixedClock(startAt);
@@ -68,6 +89,11 @@ export function authApp(
     throttle,
     statuses: statuses ?? noStatuses,
     media,
+    runtime,
+    observers,
+    adapters,
+    ...(heartbeatMs !== undefined && { heartbeatMs }),
+    ...(now && { now }),
   });
   // A client sending the session `token` as a bearer, and `language` as
   // accept-language (French without one); anonymous without a token. It sends
@@ -80,7 +106,7 @@ export function authApp(
         ...(options.language && { "accept-language": options.language }),
       },
     });
-  return { auth, app, mailer, clock, client };
+  return { auth, app, mailer, clock, client, runtime, adapters };
 }
 
 export type AuthApp = ReturnType<typeof authApp>;
