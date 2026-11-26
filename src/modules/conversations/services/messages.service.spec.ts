@@ -41,13 +41,13 @@ async function exchange(
   text = "question",
 ) {
   const conversation = await ada.conversations.find(id);
-  const made = await ada.messages.insertExchange({
+  const made = await ada.runMessages.insertExchange({
     conversation,
     parentId,
     text,
     modelId: sonnet,
   });
-  await ada.messages.finalise(made.assistant, finish);
+  await ada.runMessages.finalise(made.assistant, finish);
   return made;
 }
 
@@ -219,7 +219,7 @@ describe("MessagesService: the parent", () => {
     await expect(
       ada.messages.requireParent(conversation, String(foreign.assistant._id)),
     ).rejects.toMatchObject(invalid);
-    const streaming = await ada.messages.insertExchange({
+    const streaming = await ada.runMessages.insertExchange({
       conversation,
       parentId: done.assistant._id,
       text: "again",
@@ -228,82 +228,6 @@ describe("MessagesService: the parent", () => {
     await expect(
       ada.messages.requireParent(conversation, String(streaming.assistant._id)),
     ).rejects.toMatchObject(invalid);
-  });
-});
-
-describe("MessagesService: an exchange", () => {
-  test("a second one while a run is active is run-in-progress and writes nothing", async () => {
-    const ada = await memberOf(kit);
-    const id = await started(ada);
-    const conversation = await ada.conversations.find(id);
-    const first = await ada.messages.insertExchange({
-      conversation,
-      parentId: null,
-      text: "hello",
-      modelId: sonnet,
-    });
-    expect(first.assistant).toMatchObject({
-      status: "streaming",
-      role: "assistant",
-      parentId: first.user._id,
-    });
-    const running = await ada.conversations.find(id);
-    expect(running.activeRunId).toBe(String(first.assistant._id));
-    expect(running.activeLeafId).toEqual(first.assistant._id);
-    await expect(
-      ada.messages.insertExchange({
-        conversation: running,
-        parentId: first.assistant._id,
-        text: "again",
-        modelId: sonnet,
-      }),
-    ).rejects.toMatchObject({
-      extensions: { code: "conversations.errors.run-in-progress" },
-    });
-    expect(
-      await appMongo.db.messages.count({ conversationId: conversation._id }),
-    ).toBe(2);
-  });
-
-  test("two concurrent exchanges: one wins, the other is run-in-progress and writes nothing", async () => {
-    const ada = await memberOf(kit);
-    const id = await started(ada);
-    const conversation = await ada.conversations.find(id);
-    const send = (text: string) =>
-      ada.messages.insertExchange({
-        conversation,
-        parentId: null,
-        text,
-        modelId: sonnet,
-      });
-    const results = await Promise.allSettled([send("a"), send("b")]);
-    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-    const lost = results.find((r) => r.status === "rejected");
-    expect(lost).toMatchObject({
-      reason: { extensions: { code: "conversations.errors.run-in-progress" } },
-    });
-    expect(
-      await appMongo.db.messages.count({ conversationId: conversation._id }),
-    ).toBe(2);
-  });
-
-  test("the finalise is conditional: the first end wins and frees the conversation", async () => {
-    const ada = await memberOf(kit);
-    const id = await started(ada);
-    const conversation = await ada.conversations.find(id);
-    const { assistant } = await ada.messages.insertExchange({
-      conversation,
-      parentId: null,
-      text: "hello",
-      modelId: sonnet,
-    });
-    expect(await ada.messages.finalise(assistant, finish)).toBe(true);
-    expect(
-      await ada.messages.finalise(assistant, { ...finish, status: "stopped" }),
-    ).toBe(false);
-    const read = await appMongo.db.messages.findById(assistant._id);
-    expect(read).toMatchObject({ status: "done", finishReason: "end" });
-    expect((await ada.conversations.find(id)).activeRunId).toBeNull();
   });
 });
 

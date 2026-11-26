@@ -1,0 +1,56 @@
+"What to send in a conversation."
+input SendMessageInput {
+  "The conversation to write in."
+  conversationId: ID! @constraint(maxLength: 64)
+  """
+  The assistant message the new one follows. Left out: the end of the branch
+  shown (`Conversation.activeLeafId`). Naming an earlier assistant message
+  starts a new branch there.
+  """
+  parentId: ID @constraint(maxLength: 64)
+  "What the member says."
+  text: String! @constraint(minLength: 1, maxLength: 20000)
+}
+
+"""
+A send's outcome: the answer is being written by a run that goes on whether or
+not the client stays. Follow it at `GET /runs/<runId>/events`.
+"""
+type SendMessagePayload {
+  "The run's id: the reply message's id. Open `GET /runs/<runId>/events` with it."
+  runId: ID!
+  "The member's message, written."
+  userMessage: Message!
+  "The assistant's message, STREAMING until the run ends."
+  reply: Message!
+  "The conversation, its `activeRunId` and `activeLeafId` now pointing at the reply."
+  conversation: Conversation!
+}
+
+extend type Mutation {
+  """
+  Sends a message and starts the run that answers it. 404
+  `conversations.errors.not-found`; 400 `validation.errors.invalid-input` with
+  `parentId` invalid (`conversations.errors.invalid-parent`); 409
+  `conversations.errors.run-in-progress` while an answer is still being written
+  in the conversation; 409 `conversations.errors.persona-unavailable` once the
+  persona is someone else's PRIVATE one; 409 `models.errors.offline` or
+  `models.errors.disabled` for a model that cannot answer (nothing is written);
+  429 `conversations.errors.too-many-messages`.
+  """
+  sendMessage(
+    "The conversation, its parent message and the text."
+    input: SendMessageInput!
+  ): SendMessagePayload!
+
+  """
+  Stops the run of an answer being written: the reply keeps what was written
+  and becomes STOPPED. Stopping a run that already ended returns its message
+  unchanged. 404 `conversations.errors.run-not-found` for an unknown run or
+  another member's (the admin's too).
+  """
+  stopRun(
+    "The run's id (the reply message's id)."
+    runId: ID! @constraint(maxLength: 64)
+  ): Message!
+}

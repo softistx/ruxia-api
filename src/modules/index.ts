@@ -3,6 +3,7 @@ import type { Resolvers } from "@/generated/graphql/resolvers";
 import { accounts } from "./accounts/accounts.resolver";
 import { conversations } from "./conversations/resolvers/conversations.resolver";
 import { messages } from "./conversations/resolvers/messages.resolver";
+import { runs } from "./conversations/resolvers/runs.resolver";
 import { invitations } from "./invitations/invitations.resolver";
 import { members } from "./members/members.resolver";
 import { models } from "./models/models.resolver";
@@ -22,6 +23,7 @@ export const resolvers = mergeResolvers([
   messages,
   models,
   personas,
+  runs,
   systemResolvers,
   translationResolvers,
 ]) as Resolvers;

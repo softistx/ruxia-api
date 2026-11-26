@@ -1,6 +1,20 @@
-import type { RunEndReason } from "@softistx/ai-core";
+import type {
+  AgentEvent,
+  AgentResult,
+  RunEndReason,
+  SystemBlock,
+} from "@softistx/ai-core";
 import type { FieldIssue } from "../../shared/errors";
-import type { MessageDocument, MessageStatus } from "./models";
+import type { ModelDocument } from "../models";
+import { INTERRUPTED, TIMEOUT } from "./conversations.run-codes";
+import { costFor, partialParts, partsOf, usageOf } from "./conversations.utils";
+import type {
+  MessageDocument,
+  MessageStatus,
+  MessageUsage,
+  StoredPart,
+} from "./models";
+import type { Finish } from "./services/run-messages.service";
 
 // How a run's end reason is kept on the assistant message: an answer that
 // reached an end (even a refusal or a cut-off one) is DONE, a stopped one
@@ -48,3 +62,82 @@ export function parentIssues(
     parent.status !== "streaming";
   return sound ? [] : invalid;
 }
+
+// The language a member's locale names, in English, for the system prompt.
+export const languageName = (locale: string) =>
+  new Intl.DisplayNames(["en"], { type: "language" }).of(locale) ?? locale;
+
+// What the model is told before the conversation: the persona's personality
+// (when it has one), the language to answer in, and what an earlier fold of
+// the conversation kept.
+export const systemOf = (input: {
+  personality: string;
+  locale: string;
+  summary: string | null;
+}): SystemBlock[] =>
+  [
+    input.personality.trim(),
+    `Reply in ${languageName(input.locale)}.`,
+    input.summary === null
+      ? ""
+      : `Summary of the earlier conversation:\n${input.summary}`,
+  ]
+    .filter((text) => text !== "")
+    .map((text) => ({ text }));
+
+// How a run's end is kept on its assistant message: its status by
+// `statusOf`, the whole answer for a finished one and what was written for a
+// stopped or failed one. A thrown run has no result (FAILED, `MODEL_ERROR`);
+// an `aborted` end the shutdown caused is FAILED `INTERRUPTED` and one the
+// ceiling caused FAILED `TIMEOUT`, never STOPPED; a member's stop stays STOPPED.
+export function finishOf(input: {
+  result: AgentResult | undefined;
+  events: readonly AgentEvent[];
+  model: Pick<ModelDocument, "provider" | "providerModel" | "prices">;
+  // Why the run was first aborted: the shutdown's or the ceiling's code; none
+  // for a member's stop.
+  abortReason: unknown;
+  warn: (message: string) => void;
+}): Finish {
+  const { result, events, model, abortReason, warn } = input;
+  if (result === undefined) {
+    return failed("MODEL_ERROR", partialParts(events), null, null);
+  }
+  const usage = usageOf(result.usage);
+  const cost = costFor(model, result.usage, warn);
+  const status = statusOf(result.reason);
+  if (status === "done") {
+    return {
+      status,
+      parts: partsOf(result.messages),
+      usage,
+      cost,
+      finishReason: result.reason,
+      errorCode: null,
+    };
+  }
+  const forced =
+    status === "stopped" &&
+    (abortReason === INTERRUPTED || abortReason === TIMEOUT);
+  if (status === "stopped" && !forced) {
+    return { ...failed(null, partialParts(events), usage, cost), status };
+  }
+  const code = forced
+    ? String(abortReason)
+    : (result.error?.code ?? "MODEL_ERROR");
+  return failed(code, partialParts(events), usage, cost);
+}
+
+const failed = (
+  errorCode: string | null,
+  parts: StoredPart[],
+  usage: MessageUsage | null,
+  cost: number | null,
+): Finish => ({
+  status: "failed",
+  parts,
+  usage,
+  cost,
+  finishReason: null,
+  errorCode,
+});

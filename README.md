@@ -18,6 +18,13 @@ bun run admin:create you@example.com   # the first administrator, by invitation
 There is no sign-up: members come in through an invitation an administrator sends
 (`inviteMember`), accepted with `acceptInvitation`.
 
+## Runs
+
+`sendMessage` starts a run that outlives the request; its answer streams at
+`GET /runs/<runId>/events` (SSE with ids, `Last-Event-ID` resume and a 5 s heartbeat;
+see CONTEXT.md, "Runs"). Runs live in the API process: run one API container. No
+variable is added (`ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL` and `TITLE_MODEL_ID` as before).
+
 ## Checks
 
 `bun run verify` runs generation, the schema check, Biome, `bun check` and the tests.

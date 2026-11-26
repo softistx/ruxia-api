@@ -1,3 +1,4 @@
+import type { AgentObserver } from "@softistx/ai-core";
 import DataLoader from "dataloader";
 import type { Auth } from "../auth/auth";
 import type { Viewer } from "../auth/viewer";
@@ -11,10 +12,9 @@ import {
   StepUpService,
 } from "./accounts";
 import {
-  ConversationsService,
-  MessagesService,
+  type ConversationsRuntime,
+  conversationsServices,
   type ModelAdapters,
-  TitlesService,
 } from "./conversations";
 import { InvitationsService } from "./invitations";
 import { MembersService, memberRenamer } from "./members";
@@ -40,6 +40,9 @@ export function services(deps: {
   statuses: StatusStore;
   adapters: ModelAdapters;
   titleModelId: string;
+  // Where the runs live (one per app) and what watches each of them.
+  runtime: ConversationsRuntime;
+  observers: readonly AgentObserver[];
   now: () => Date;
 }) {
   const limit = deps.throttle.client(deps.clientIp);
@@ -57,6 +60,20 @@ export function services(deps: {
     deps.viewer,
     (id) => owners.load(id),
   );
+  const chat = conversationsServices({
+    mongo: appMongo,
+    viewer: deps.viewer,
+    models: modelCatalogue,
+    personas,
+    adapters: deps.adapters,
+    titleModelId: deps.titleModelId,
+    runtime: deps.runtime,
+    observers: deps.observers,
+    background: deps.auth.background,
+    sends: deps.throttle.sends,
+    warn: statusWarning,
+    now: deps.now,
+  });
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
     passkeys: new PasskeysService(deps.auth, deps.request, deps.viewer, limit),
@@ -78,22 +95,7 @@ export function services(deps: {
     ),
     models: modelCatalogue,
     personas,
-    conversations: new ConversationsService(
-      appMongo,
-      modelCatalogue,
-      personas,
-      deps.viewer,
-      deps.now,
-    ),
-    messages: new MessagesService(appMongo, deps.viewer, deps.now),
-    titles: new TitlesService(
-      appMongo,
-      modelCatalogue,
-      deps.adapters,
-      deps.titleModelId,
-      (message) => statusWarning("titles", message),
-      deps.now,
-    ),
+    ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
     ),

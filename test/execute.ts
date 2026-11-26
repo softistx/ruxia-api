@@ -3,6 +3,7 @@ import { execute } from "graphql";
 import { janusViewer, type Viewer } from "../src/auth/viewer";
 import { schema } from "../src/http/schema";
 import { unthrottled } from "../src/limits/throttle";
+import { conversationsRuntime } from "../src/modules/conversations";
 import { noStatuses } from "../src/modules/models";
 import { services } from "../src/modules/services";
 import type { AuthApp } from "./auth";
@@ -32,6 +33,8 @@ export async function executeAs<D, V extends Record<string, unknown>>(
         statuses: noStatuses,
         adapters: fakeAdapters(),
         titleModelId: "claude-haiku-5-5",
+        runtime: conversationsRuntime({ maxRunMs: 60_000 }),
+        observers: [],
         now: () => new Date(),
       }),
     },
