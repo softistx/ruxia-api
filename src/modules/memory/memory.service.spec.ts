@@ -134,7 +134,11 @@ describe("MemoryService", () => {
   test("the kit is empty unless the persona enables memory", async () => {
     const ada = await memberOf(kit);
     const off = await ada.personas.find(await persona(ada, false));
-    expect(await ada.memory.kit(off)).toEqual({ facts: null, tools: [] });
+    expect(await ada.memory.kit(off)).toEqual({
+      facts: null,
+      tools: [],
+      observer: {},
+    });
     const onId = await persona(ada);
     await ada.memory.add(onId, "Likes tea", "user");
     const kitOn = await ada.memory.kit(await ada.personas.find(onId));
@@ -166,5 +170,54 @@ describe("MemoryService", () => {
     expect(forget?.validate({ id: String(item._id) })).toMatchObject({
       ok: false,
     });
+  });
+
+  test("10 adds at once on 199 items end at exactly 200", async () => {
+    const ada = await memberOf(kit);
+    const id = await persona(ada);
+    const { id: _read, ...seed } = await ada.memory.add(id, "fact 0", "user");
+    await appMongo.db.memoryItems.raw.insertMany(
+      Array.from({ length: 198 }, (_, i) => ({
+        ...seed,
+        _id: new ObjectId(),
+        text: `fact ${i + 1}`,
+      })),
+    );
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, (_, i) =>
+        ada.memory.add(id, `racing ${i}`, "user"),
+      ),
+    );
+    expect(await ada.memory.list(id)).toHaveLength(200);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const result of results) {
+      if (result.status === "rejected") {
+        expect(result.reason).toMatchObject(refused("memory.errors.full"));
+      }
+    }
+  });
+
+  test("a tool that is not the memory's taints the run: remember is proposed even without asking", async () => {
+    const ada = await memberOf(kit);
+    await ada.members.updateSettings({ rememberWithoutAsking: true });
+    const { tools, observer } = await ada.memory.kit(
+      await ada.personas.find(await persona(ada)),
+    );
+    const remember = tools.find((tool) => tool.name === "remember");
+    expect(remember?.confirm).toBe(false);
+    const call = {
+      type: "tool-call" as const,
+      id: "c",
+      name: "remember",
+      input: {},
+    };
+    await observer.onToolStart?.({ runId: "r", step: 0, call });
+    expect(remember?.confirm).toBe(false);
+    await observer.onToolStart?.({
+      runId: "r",
+      step: 0,
+      call: { type: "tool-call", id: "c2", name: "web_search", input: {} },
+    });
+    expect(remember?.confirm).toBe(true);
   });
 });

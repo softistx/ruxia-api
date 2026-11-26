@@ -6,6 +6,7 @@ import type {
 } from "@softistx/ai-core";
 import type { FieldIssue } from "../../shared/errors";
 import type { ModelDocument } from "../models";
+import { turnsOf } from "./conversations.history.utils";
 import { INTERRUPTED, TIMEOUT } from "./conversations.run-codes";
 import { costFor, partialParts, partsOf, usageOf } from "./conversations.utils";
 import type {
@@ -113,6 +114,7 @@ export function finishOf(input: {
     return {
       status,
       parts: partsOf(result.messages),
+      turns: turnsOf(result.messages),
       usage,
       cost,
       finishReason: result.reason,

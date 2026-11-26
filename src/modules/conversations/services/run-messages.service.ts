@@ -6,6 +6,7 @@ import { exhausted } from "../../../shared/errors";
 import { retryWriteConflicts } from "../../../shared/retry";
 import type { Tx } from "../../../shared/tx";
 import type { AttachmentPart, AttachmentsService } from "../../attachments";
+import { actionDocs, type Proposals } from "../conversations.actions.utils";
 import { runInProgress } from "../conversations.errors";
 import {
   endMessage,
@@ -17,6 +18,7 @@ import {
 import type {
   ConversationDocument,
   MessageDocument,
+  MessageTurn,
   MessageUsage,
   StoredPart,
 } from "../models";
@@ -25,6 +27,8 @@ import type {
 export interface Finish {
   status: "done" | "stopped" | "failed";
   parts: StoredPart[];
+  // How the parts group in the SDK's messages (a DONE answer only).
+  turns?: MessageTurn[];
   usage: MessageUsage | null;
   cost: number | null;
   finishReason: string | null;
@@ -111,12 +115,13 @@ export class RunMessagesService {
   }
 
   // Ends a streaming message, once: false when something else did first. On
-  // success the conversation is released (`activeRunId` null, `lastMessageAt`
+  // success the actions it proposed are stored, the conversation is released (`activeRunId` null, `lastMessageAt`
   // moved to the end of the answer) and the message's cost and usage are added
   // to the spend ledger, in the same transaction.
   async finalise(
     message: Pick<MessageDocument, "_id" | "conversationId">,
     end: Finish,
+    proposed: Proposals["proposed"] = [],
   ): Promise<boolean> {
     const at = this.now();
     return retryWriteConflicts(
@@ -135,6 +140,15 @@ export class RunMessagesService {
             },
           );
           if (ended === null) return false;
+          // The actions the answer proposes are stored in this transaction: the
+          // message never carries an id with no document, and a stop that won
+          // leaves none.
+          if (proposed.length > 0) {
+            await tx.db.proposedActions.raw.insertMany(
+              actionDocs(message, this.actor, proposed, at),
+              options,
+            );
+          }
           // The message's figures join the spend ledger in the same
           // transaction, so the spend counts it once and survives a purge.
           const added = spendIncrement(ended, end, at);

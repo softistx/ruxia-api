@@ -1,6 +1,8 @@
 import { AiError, type AnyTool, defineTool } from "@softistx/ai-core";
 import type { GraphQLError } from "graphql";
 import { z } from "zod";
+import type { PersonaDocument } from "../personas/models";
+import type { MemoryPersonas } from "./memory.integrity";
 import { MAX_TEXT } from "./memory.rules";
 
 // What the two tools do to the member's memory of one persona: the service,
@@ -20,7 +22,10 @@ const toolFailure = (error: unknown) => {
   });
 };
 
-// The `remember` and `forget` tools of one persona. `texts` maps the member's
+// The `remember` and `forget` tools of one persona. `tainted` says whether the
+// run has had output from a tool that is not the memory's (the web, an MCP
+// server): from then on `remember` is proposed even when `auto`, because what
+// it would save may come from untrusted text. `texts` maps the member's
 // own item ids to their text: `forget` accepts no other id (the input is
 // refused to the model, which can correct it) and its confirmation line names
 // the fact. `remember` is proposed unless `auto` (the member's "remember
@@ -29,8 +34,9 @@ export function memoryTools(input: {
   actions: MemoryActions;
   texts: ReadonlyMap<string, string>;
   auto: boolean;
+  tainted: () => boolean;
 }): AnyTool[] {
-  const { actions, texts, auto } = input;
+  const { actions, texts, auto, tainted } = input;
   const remember = defineTool({
     name: "remember",
     description:
@@ -74,5 +80,28 @@ export function memoryTools(input: {
       }
     },
   });
+  // Read when the model calls it: proposed unless the member remembers without
+  // asking and nothing untrusted has reached the run.
+  Object.defineProperty(remember, "confirm", {
+    get: () => !auto || tainted(),
+  });
   return [remember, forget];
 }
+
+// The tools a proposed action is confirmed with, for the conversation that
+// proposed it: the memory tools of the persona it started with (a deleted one
+// included). The registry hands it to the conversations as their port. This
+// file stays the module's tools role: tools and what builds them.
+export const memoryActionTools = (
+  memory: { kit(persona: PersonaDocument): Promise<{ tools: AnyTool[] }> },
+  personas: Pick<MemoryPersonas, "findIncludingDeleted">,
+) => ({
+  toolsFor: async (conversation: {
+    personaId: { toString(): string };
+  }): Promise<AnyTool[]> => {
+    const persona = await personas.findIncludingDeleted(
+      String(conversation.personaId),
+    );
+    return (await memory.kit(persona)).tools;
+  },
+});

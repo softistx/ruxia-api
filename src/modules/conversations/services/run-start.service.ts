@@ -47,7 +47,7 @@ export interface RunStartDeps {
     "insertExchange" | "finalise" | "ofRun" | "release"
   >;
   titles: Pick<TitlesService, "name">;
-  actions: Pick<ActionsService, "record">;
+  actions: Pick<ActionsService, "outcomes">;
   models: ConversationModels;
   budgets: ConversationBudgets;
   personas: ConversationPersonas;
@@ -180,7 +180,7 @@ export class RunStartService {
     const { conversation, user, assistant, model } = exchange;
     const adapter = adapters.adapterFor(model);
     const path = await messages.path(conversation, user._id);
-    const { facts, tools } = await this.deps.memory.kit(persona);
+    const { facts, tools, observer } = await this.deps.memory.kit(persona);
     const base = {
       personality: persona.personality,
       locale: this.actor.locale,
@@ -197,6 +197,7 @@ export class RunStartService {
       ),
       summarize: summarizeWith(adapter),
       expand: (lists) => attachments.expand(lists, readerOf(model)),
+      preface: await this.deps.actions.outcomes(path),
     });
     const run = runAgent({
       model: adapter,
@@ -204,7 +205,7 @@ export class RunStartService {
       messages: context.messages,
       tools,
       proposalTtlMs: PROPOSAL_TTL_MS,
-      observers,
+      observers: [...observers, observer],
       now: () => now().getTime(),
     });
     const recorded = recorder(run, (result, events, abortReason) =>

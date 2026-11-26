@@ -10,7 +10,7 @@ enum ProposedActionStatus {
   REJECTED
   "Nobody answered within 15 minutes; nothing ran."
   EXPIRED
-  "Confirmed but the tool failed; `resultCode` says why."
+  "Confirmed but the tool failed (or stayed RUNNING for 5 minutes); `resultCode` says why."
   FAILED
 }
 
@@ -73,8 +73,7 @@ extend type Mutation {
   Confirms a pending action and applies it now; answers it with its outcome. A
   second confirm answers the stored outcome and runs nothing. 404
   `conversations.errors.action-not-found`; 409 `conversations.errors.action-expired`
-  past its expiry; 409 `conversations.errors.action-not-ready` while the
-  message is still being written.
+  past its expiry (the action becomes EXPIRED; `rejectAction` answers the same).
   """
   confirmAction("The action's id." id: ID!): ProposedAction!
   "Rejects a pending action: nothing runs. Answers an action already decided as it stands."

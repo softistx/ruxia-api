@@ -25,7 +25,6 @@ export const codes = defineCodes("conversations", [
   "too-many-exports",
   "action-not-found",
   "action-expired",
-  "action-not-ready",
 ]);
 
 // An id that names no conversation of the viewer (or a malformed one).
@@ -127,7 +126,3 @@ export const actionNotFound = () =>
 // The action's time to be answered has passed: nothing ran.
 export const actionExpired = () =>
   fail("conversations.errors.action-expired", { status: 409 });
-
-// The message that carries the action is still being written.
-export const actionNotReady = () =>
-  fail("conversations.errors.action-not-ready", { status: 409 });

@@ -2,6 +2,5 @@
   "memory.errors.not-found": "This remembered fact does not exist.",
   "memory.errors.full": "This persona already remembers {max, plural, one {# fact} other {# facts}}, the most it can keep for you. Delete some to add more.",
   "conversations.errors.action-not-found": "This action does not exist.",
-  "conversations.errors.action-expired": "This action was not confirmed in time. Ask again if you still want it.",
-  "conversations.errors.action-not-ready": "The answer that proposed this action is still being written. Confirm it once the answer is complete."
+  "conversations.errors.action-expired": "This action was not confirmed in time. Ask again if you still want it."
 }

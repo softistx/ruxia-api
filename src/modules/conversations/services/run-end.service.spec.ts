@@ -61,7 +61,6 @@ function endWith(
   const released: string[] = [];
   const named: { user: string; reply: string }[] = [];
   const warnings: string[] = [];
-  const recorded: number[] = [];
   const checked: [string, Date][] = [];
   const background = {
     run: (_name: string, task: () => Promise<unknown>) => void task(),
@@ -79,11 +78,6 @@ function endWith(
         return true;
       },
     },
-    actions: {
-      record: async (_message, proposals) => {
-        recorded.push(proposals.length);
-      },
-    },
     titles: {
       name: async (_conversation, text) => {
         named.push(text);
@@ -98,7 +92,7 @@ function endWith(
     background,
     warn: (message) => warnings.push(message),
   });
-  return { service, finished, released, named, warnings, checked, recorded };
+  return { service, finished, released, named, warnings, checked };
 }
 
 describe("RunEndService", () => {

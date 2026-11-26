@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { executeTool } from "@softistx/ai-core";
+import { ObjectId } from "mongodb";
 import { itemNotFound } from "./memory.errors";
-import { memoryTools } from "./memory.tools";
+import { memoryActionTools, memoryTools } from "./memory.tools";
 
 const texts = new Map([["a1", "Likes tea"]]);
 
-function toolsWith(auto: boolean, refuse = false) {
+function toolsWith(auto: boolean, refuse = false, tainted = () => false) {
   const calls: string[] = [];
   const tools = memoryTools({
     actions: {
@@ -21,6 +22,7 @@ function toolsWith(auto: boolean, refuse = false) {
     },
     texts,
     auto,
+    tainted,
   });
   const byName = (name: string) => {
     const tool = tools.find((candidate) => candidate.name === name);
@@ -94,5 +96,34 @@ describe("memoryTools", () => {
         error: { details: [{ code: "memory.errors.not-found" }] },
       });
     }
+  });
+
+  test("once an untrusted tool has reached the run, remember is proposed even without asking", () => {
+    let tainted = false;
+    const { remember, forget } = toolsWith(true, false, () => tainted);
+    expect(remember.confirm).toBe(false);
+    tainted = true;
+    expect(remember.confirm).toBe(true);
+    expect(forget.confirm).toBe(true);
+    expect(toolsWith(false, false, () => false).remember.confirm).toBe(true);
+  });
+});
+
+describe("memoryActionTools", () => {
+  test("the action tools are the kit's tools of the conversation's persona, deleted or not", async () => {
+    const asked: string[] = [];
+    const tool = { name: "remember" };
+    const tools = memoryActionTools(
+      {
+        kit: async (persona) => {
+          asked.push(String(persona._id));
+          return { tools: [tool as never] };
+        },
+      },
+      { findIncludingDeleted: async (id) => ({ _id: id }) as never },
+    );
+    const personaId = new ObjectId();
+    expect(await tools.toolsFor({ personaId })).toEqual([tool as never]);
+    expect(asked).toEqual([String(personaId)]);
   });
 });

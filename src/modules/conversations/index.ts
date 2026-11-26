@@ -2,6 +2,7 @@ export * from "./conversations.actions.utils";
 export * from "./conversations.adapters";
 export * from "./conversations.errors";
 export * from "./conversations.events";
+export * from "./conversations.history.utils";
 export * from "./conversations.integrity";
 export * from "./conversations.media";
 export * from "./conversations.purge";

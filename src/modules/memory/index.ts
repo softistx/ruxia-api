@@ -4,4 +4,3 @@ export * from "./memory.model";
 export * from "./memory.rules";
 export * from "./memory.service";
 export * from "./memory.tools";
-export * from "./memory.utils";

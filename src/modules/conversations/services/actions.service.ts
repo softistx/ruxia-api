@@ -1,34 +1,35 @@
 import {
   AiError,
-  type AnyTool,
   rejectAction,
   runConfirmedAction,
   type ToolResultPart,
 } from "@softistx/ai-core";
 import { isObjectIdString } from "@softistx/mongo";
+import DataLoader from "dataloader";
 import { ObjectId } from "mongodb";
 import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import {
-  type Proposals,
+  prefaceOf,
   refusedResult,
   sdkAction,
   statusAt,
 } from "../conversations.actions.utils";
-import {
-  actionExpired,
-  actionNotFound,
-  actionNotReady,
-} from "../conversations.errors";
+import { actionExpired, actionNotFound } from "../conversations.errors";
 import type { ConversationActionTools } from "../conversations.integrity";
-import type { ProposedActionDocument, StoredPart } from "../models";
+import type {
+  ActionStatus,
+  MessageDocument,
+  ProposedActionDocument,
+} from "../models";
 import type { ConversationsService } from "./conversations.service";
 
-// The proposed actions of the viewer, for one request: stored when a run ends,
-// then confirmed (the tool runs now, once) or rejected. Every read and write is
-// bound to the viewer (`ownerId`). Confirming starts no model turn: the
-// outcome is recorded on the message as a `tool-result` part and the member
-// writes the next message.
+// The proposed actions of the viewer, for one request. They are stored with the
+// end of the message that proposes them (`RunMessagesService.finalise`); here
+// they are confirmed (the tool runs now, once) or rejected. Every read and
+// write is bound to the viewer (`ownerId`). Confirming starts no model turn:
+// the outcome reaches the model at the head of the member's next message
+// (`outcomes`).
 export class ActionsService {
   constructor(
     private readonly mongo: Pick<AppMongo, "as" | "db">,
@@ -47,28 +48,25 @@ export class ActionsService {
     return this.mongo.as(this.actor).db.proposedActions.raw;
   }
 
-  // Stores the actions a run proposed, once its message has ended. `run` is the
-  // run's id (the assistant message's).
-  async record(
-    message: { _id: ObjectId; conversationId: ObjectId },
-    proposals: Proposals["proposed"],
-  ) {
-    for (const { id, part } of proposals) {
-      await this.mongo.as(this.actor).db.proposedActions.create({
-        _id: id,
-        ownerId: this.actor,
-        conversationId: message.conversationId,
-        messageId: message._id,
-        runId: String(message._id),
-        callId: part.id,
-        tool: part.tool,
-        input: part.input,
-        summary: part.summary ?? null,
-        status: "pending",
-        expiresAt: new Date(part.expiresAt),
-      });
-    }
-  }
+  // One batch per tick for every message of a page: the statuses a card shows.
+  private readonly statusLoader = new DataLoader(
+    async (ids: readonly string[]): Promise<ActionStatus[]> => {
+      const found = await this.mongo
+        .as(this.actor)
+        .db.proposedActions.findMany({
+          filter: {
+            ownerId: this.actor,
+            _id: {
+              $in: ids.filter(isObjectIdString).map((id) => new ObjectId(id)),
+            },
+          },
+          limit: Math.max(ids.length, 1),
+        });
+      const at = this.now();
+      const byId = new Map(found.map((a) => [String(a._id), statusAt(a, at)]));
+      return ids.map((id) => byId.get(id) ?? "expired");
+    },
+  );
 
   // One of the viewer's actions, whose conversation is live.
   async find(id: string): Promise<ProposedActionDocument> {
@@ -97,58 +95,76 @@ export class ActionsService {
     });
   }
 
-  // Where an action stands now: a pending one past its expiry is expired.
+  // Where an action stands now: a pending one past its expiry is expired, a
+  // `running` one stuck for 5 minutes failed.
   statusOf(action: ProposedActionDocument) {
     return statusAt(action, this.now());
   }
 
   // The statuses of the actions a message shows, by id, expiry applied.
   async statuses(ids: readonly string[]) {
-    const found = await this.mongo.as(this.actor).db.proposedActions.findMany({
-      filter: {
-        ownerId: this.actor,
-        _id: {
-          $in: ids.filter(isObjectIdString).map((id) => new ObjectId(id)),
-        },
-      },
-      limit: Math.max(ids.length, 1),
-    });
-    const at = this.now();
-    return new Map(found.map((a) => [String(a._id), statusAt(a, at)]));
+    const statuses = await this.statusLoader.loadMany([...ids]);
+    return new Map(
+      ids.map((id, index) => {
+        const status = statuses[index];
+        return [id, typeof status === "string" ? status : "expired"] as const;
+      }),
+    );
   }
 
-  // Confirms a pending action: claimed first (one writer wins), the tool run
-  // once, the outcome stored and recorded on the message. A decided action is
+  // What the decided actions of `path` tell the model, by the id of the
+  // member's message each joins (see `prefaceOf`).
+  async outcomes(path: readonly MessageDocument[]) {
+    const carrying = path.filter(
+      (doc) =>
+        doc.role === "assistant" &&
+        doc.parts.some((p) => p.type === "proposed-action"),
+    );
+    if (carrying.length === 0) return new Map();
+    const actions = await this.mongo
+      .as(this.actor)
+      .db.proposedActions.findMany({
+        filter: {
+          ownerId: this.actor,
+          messageId: { $in: carrying.map((doc) => doc._id) },
+        },
+        sort: { createdAt: 1, _id: 1 },
+        limit: 1000,
+      });
+    return prefaceOf(path, actions, this.now());
+  }
+
+  // Confirms a pending action: claimed first (one writer wins, and only before
+  // its expiry), the tool run once, the outcome stored. A decided action is
   // answered as it stands.
   async confirm(id: string): Promise<ProposedActionDocument> {
     const action = await this.find(id);
     if (action.status !== "pending") return action;
     const at = this.now();
-    if (action.expiresAt <= at) {
-      await this.settle(action, "pending", "expired", null);
-      throw actionExpired();
-    }
-    await this.requireEnded(action);
+    if (action.expiresAt <= at) return this.expire(action);
     const claimed = await this.raw.findOneAndUpdate(
-      { _id: action._id, ownerId: this.actor, status: "pending" },
+      {
+        _id: action._id,
+        ownerId: this.actor,
+        status: "pending",
+        expiresAt: { $gt: at },
+      },
       { $set: { status: "running", updatedAt: at } },
       { returnDocument: "after" },
     );
     if (claimed === null) return this.find(id);
-    const tools = await this.tools.toolsFor(
-      await this.conversations.find(String(action.conversationId)),
-    );
-    const done = await this.run(action, tools);
+    const done = await this.apply(action);
     await this.settle(action, "running", done.status, done.result);
-    await this.addResult(action, done.result);
     return this.find(id);
   }
 
-  // Rejects a pending action: nothing runs. A decided action is answered as it
+  // Rejects a pending action: nothing runs. One past its expiry is settled
+  // expired and refused as `confirm` does; a decided one is answered as it
   // stands.
   async reject(id: string): Promise<ProposedActionDocument> {
     const action = await this.find(id);
     if (action.status !== "pending") return action;
+    if (action.expiresAt <= this.now()) return this.expire(action);
     const rejected = rejectAction(sdkAction(action, "pending"), {
       now: () => this.now().getTime(),
     });
@@ -156,10 +172,20 @@ export class ActionsService {
     return this.find(id);
   }
 
-  // The SDK runs the tool; whatever it refuses or throws is a failed action
-  // with the code alone.
-  private async run(action: ProposedActionDocument, tools: AnyTool[]) {
+  // An action past its expiry: written expired, nothing ran.
+  private async expire(action: ProposedActionDocument): Promise<never> {
+    await this.settle(action, "pending", "expired", null);
+    throw actionExpired();
+  }
+
+  // The SDK runs the tool; whatever fails, finding the tools included, is a
+  // failed action with the code alone.
+  private async apply(action: ProposedActionDocument) {
     try {
+      const conversation = await this.conversations.find(
+        String(action.conversationId),
+      );
+      const tools = await this.tools.toolsFor(conversation);
       const done = await runConfirmedAction(
         sdkAction(action, "running"),
         tools,
@@ -189,32 +215,6 @@ export class ActionsService {
           decidedAt: at,
           updatedAt: at,
         },
-      },
-    );
-  }
-
-  // The message that carries the action must be done writing, or its end
-  // would overwrite what a confirm adds to it.
-  private async requireEnded(action: ProposedActionDocument) {
-    const streaming = await this.mongo.as(this.actor).db.messages.exists({
-      _id: action.messageId,
-      ownerId: this.actor,
-      status: "streaming",
-    });
-    if (streaming) throw actionNotReady();
-  }
-
-  // The tool's outcome joins the assistant message as a `tool-result` part.
-  private async addResult(
-    action: ProposedActionDocument,
-    result: ToolResultPart | null,
-  ) {
-    if (result === null) return;
-    await this.mongo.as(this.actor).db.messages.raw.updateOne(
-      { _id: action.messageId, ownerId: this.actor },
-      {
-        $push: { parts: result as StoredPart },
-        $set: { updatedAt: this.now() },
       },
     );
   }

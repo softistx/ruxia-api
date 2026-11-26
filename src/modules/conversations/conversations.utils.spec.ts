@@ -7,6 +7,13 @@ import {
   type Usage,
 } from "@softistx/ai-core";
 import { ObjectId } from "mongodb";
+import {
+  docIdOf,
+  summaryAnchor,
+  toModelMessages,
+  toStored,
+  turnsOf,
+} from "./conversations.history.utils";
 import { shownParts } from "./conversations.shown.utils";
 import {
   attachmentTokens,
@@ -18,8 +25,6 @@ import {
   partialParts,
   partsOf,
   textMessage,
-  toModelMessages,
-  toStored,
   usageOf,
 } from "./conversations.utils";
 import type { MessageDocument, StoredPart } from "./models";
@@ -40,6 +45,7 @@ function message(
     _id: new ObjectId(),
     conversationId: new ObjectId("66f000000000000000000001"),
     parts,
+    turns: [],
     role,
     contextSummary: null,
     createdAt: new Date(1_000),
@@ -211,7 +217,7 @@ describe("the path", () => {
       message("assistant", []),
       path[2],
     ] as MessageDocument[];
-    expect(toStored(withEmpty).map((m) => m.seq)).toEqual([1, 3]);
+    expect(toStored(withEmpty).map((m) => m.seq)).toEqual([1, 2]);
   });
 
   test("pages walk the branch and refuse a foreign cursor", () => {
@@ -293,5 +299,109 @@ describe("attachments in messages", () => {
     expect(
       attachmentTokens([message("user", [{ type: "text", text: "x" }])]),
     ).toBe(0);
+  });
+});
+
+describe("an answer with turns", () => {
+  const parts: StoredPart[] = [
+    { type: "text", text: "Let me note that." },
+    { type: "tool-call", id: "c1", name: "remember", input: { text: "t" } },
+    {
+      type: "tool-result",
+      callId: "c1",
+      name: "remember",
+      isError: false,
+      output: { status: "pending", actionId: "a1" },
+    },
+    {
+      type: "proposed-action",
+      id: "a1",
+      tool: "remember",
+      input: { text: "t" },
+      expiresAt: 1,
+    },
+    { type: "text", text: "Waiting for you." },
+  ];
+  const turns = [
+    { role: "assistant" as const, count: 2 },
+    { role: "tool" as const, count: 2 },
+    { role: "assistant" as const, count: 1 },
+  ];
+  const answer = () => message("assistant", parts, { turns });
+
+  test("turnsOf counts a run's messages, images left out", () => {
+    const run: Message[] = [
+      { role: "assistant", parts: parts.slice(0, 2) as never },
+      { role: "tool", parts: parts.slice(2, 4) as never },
+      {
+        role: "assistant",
+        parts: [...parts.slice(4), { type: "image" }] as never,
+      },
+    ];
+    expect(turnsOf(run)).toEqual(turns);
+  });
+
+  test("the history is assistant (call), tool (result and proposal), assistant (text)", () => {
+    const history = toModelMessages([answer()]);
+    expect(history.map((m) => [m.role, m.parts.map((p) => p.type)])).toEqual([
+      ["assistant", ["text", "tool-call"]],
+      ["tool", ["tool-result", "proposed-action"]],
+      ["assistant", ["text"]],
+    ]);
+  });
+
+  test("a message whose turns do not add up, or has none, drops its tool parts", () => {
+    for (const odd of [
+      message("assistant", parts),
+      message("assistant", parts, { turns: [{ role: "assistant", count: 2 }] }),
+    ]) {
+      expect(toModelMessages([odd])).toEqual([
+        {
+          role: "assistant",
+          parts: [text("Let me note that."), text("Waiting for you.")] as never,
+        },
+      ]);
+    }
+  });
+
+  test("toStored gives each turn its own id and numbers them in order", () => {
+    const doc = answer();
+    const stored = toStored([doc]);
+    expect(stored.map((m) => [m.id, m.seq])).toEqual([
+      [`${doc._id}#0`, 1],
+      [`${doc._id}#1`, 2],
+      [`${doc._id}#2`, 3],
+    ]);
+  });
+
+  test("the preface heads the member's message it names", () => {
+    const user = message("user", [text("Next")]);
+    const lead = [text("[application event: action outcome]")] as never;
+    const history = toModelMessages(
+      [answer(), user],
+      new Map([[String(user._id), lead]]),
+    );
+    expect(history.at(-1)).toEqual({
+      role: "user",
+      parts: [
+        text("[application event: action outcome]"),
+        text("Next"),
+      ] as never,
+    });
+    expect(
+      toStored([answer(), user], new Map([[String(user._id), lead]])).at(-1)
+        ?.message.parts,
+    ).toHaveLength(2);
+  });
+
+  test("a fold's summary is stored on the answer only past its last turn", () => {
+    const before = message("user", [text("Hi")]);
+    const doc = answer();
+    const path = [before, doc];
+    expect(summaryAnchor(path, `${doc._id}#2`)).toBe(String(doc._id));
+    expect(summaryAnchor(path, `${doc._id}#0`)).toBe(String(before._id));
+    expect(summaryAnchor([doc], `${doc._id}#1`)).toBeUndefined();
+    expect(summaryAnchor(path, String(before._id))).toBe(String(before._id));
+    expect(docIdOf(`${doc._id}#1`)).toBe(String(doc._id));
   });
 });

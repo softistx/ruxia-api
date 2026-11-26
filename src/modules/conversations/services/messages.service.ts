@@ -11,12 +11,16 @@ import { toConnection } from "../../../shared/pagination";
 import { type Expandable, isAttachment } from "../../attachments";
 import { siblingsOf } from "../conversations.branches.utils";
 import { invalidCursor, messageNotFound } from "../conversations.errors";
+import {
+  docIdOf,
+  summaryAnchor,
+  toStored,
+} from "../conversations.history.utils";
 import { compactionBudget, parentIssues } from "../conversations.rules";
 import {
   attachmentTokens,
   contextOf,
   pageOfPath,
-  toStored,
 } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
 
@@ -149,18 +153,26 @@ export class MessagesService {
       systemTokens: number;
       summarize: (messages: Message[]) => Promise<string>;
       expand: (lists: readonly Expandable[]) => Promise<Part[][]>;
+      // What decided actions tell the model, by the id of the member's message
+      // each joins (`ActionsService.outcomes`).
+      preface?: ReadonlyMap<string, Part[]>;
     },
   ) {
+    const preface = options.preface ?? new Map<string, Part[]>();
     const { summary, start } = contextOf(path);
     const result = await this.folded(
-      toStored(path).slice(start),
+      toStored(path.slice(start), preface),
       path,
       summary,
       compactionBudget(options.window, options.systemTokens),
       options.summarize,
     );
-    if (result.summary !== undefined && result.throughMessageId !== undefined) {
-      await this.messages.update(result.throughMessageId, {
+    const anchor =
+      result.throughMessageId === undefined
+        ? undefined
+        : summaryAnchor(path, result.throughMessageId);
+    if (result.summary !== undefined && anchor !== undefined) {
+      await this.messages.update(anchor, {
         contextSummary: {
           text: result.summary,
           tokens: estimateTokens(result.summary),
@@ -170,7 +182,12 @@ export class MessagesService {
     }
     return {
       summary: result.summary ?? summary?.text ?? null,
-      messages: await this.withFiles(result.messages, path, options.expand),
+      messages: await this.withFiles(
+        result.messages,
+        path,
+        options.expand,
+        preface,
+      ),
     };
   }
 
@@ -193,7 +210,7 @@ export class MessagesService {
         ...(summary && { summary: { text: summary.text } }),
       });
     const first = await run(budget);
-    const ids = new Set(first.messages.map((message) => message.id));
+    const ids = new Set(first.messages.map((message) => docIdOf(message.id)));
     const reserved = attachmentTokens(
       path.filter((message) => ids.has(String(message._id))),
     );
@@ -208,9 +225,10 @@ export class MessagesService {
     kept: readonly StoredMessage[],
     path: readonly MessageDocument[],
     expand: (lists: readonly Expandable[]) => Promise<Part[][]>,
+    preface: ReadonlyMap<string, Part[]>,
   ): Promise<Message[]> {
     const byId = new Map(path.map((message) => [String(message._id), message]));
-    const docs = kept.map((stored) => byId.get(stored.id));
+    const docs = kept.map((stored) => byId.get(docIdOf(stored.id)));
     const carrying = docs.filter(
       (doc) => doc?.parts.some(isAttachment) === true,
     ) as MessageDocument[];
@@ -219,7 +237,13 @@ export class MessagesService {
       const at = carrying.indexOf(docs[index] as MessageDocument);
       const doc = docs[index];
       return doc !== undefined && at !== -1
-        ? { role: doc.role, parts: expanded[at] as Part[] }
+        ? {
+            role: doc.role,
+            parts: [
+              ...(preface.get(String(doc._id)) ?? []),
+              ...(expanded[at] as Part[]),
+            ],
+          }
         : stored.message;
     });
   }

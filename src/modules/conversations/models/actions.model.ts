@@ -40,7 +40,7 @@ export const proposedActions = defineCollection({
     callId: z.string().max(200),
     tool: z.string().max(64),
     input: z.unknown(),
-    summary: z.string().max(500).nullable().default(null),
+    summary: z.string().max(1000).nullable().default(null),
     status: z.enum(actionStatuses),
     expiresAt: z.date(),
     result: toolResultPart.nullable().default(null),
