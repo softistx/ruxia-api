@@ -1,3 +1,4 @@
+import type { ObjectId } from "mongodb";
 import type { AppMongo } from "../../../config/db";
 import type { AttachmentKind } from "../attachments.model";
 
@@ -28,6 +29,11 @@ export class AttachmentFiles {
       truncated: false,
       ...file,
     });
+  }
+
+  // Removes a record (the upload that went past the quota).
+  async forget(id: ObjectId) {
+    await this.mongo.db.attachments.raw.deleteOne({ _id: id });
   }
 
   // How many files `ownerId` holds (the quota's count).

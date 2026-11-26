@@ -10,8 +10,7 @@ import {
 } from "@softistx/ai-core";
 import type { StoredMessage } from "@softistx/ai-memory";
 import type { GraphQLError } from "graphql";
-import { estimateAttachment } from "../attachments/attachments.rules";
-import { isAttachment, standIn } from "../attachments/attachments.utils";
+import { estimateAttachment, isAttachment, standIn } from "../attachments";
 import type { ModelDocument } from "../models";
 import type { MessageDocument, MessageUsage, StoredPart } from "./models";
 

@@ -81,7 +81,12 @@ export function services(deps: {
     },
     deps.viewer,
   );
-  const attachments = new AttachmentsService(appMongo, deps.media, deps.viewer);
+  const attachments = new AttachmentsService(
+    appMongo,
+    deps.media,
+    deps.viewer,
+    (message) => statusWarning("attachments", message),
+  );
   const chat = conversationsServices({
     mongo: appMongo,
     viewer: deps.viewer,

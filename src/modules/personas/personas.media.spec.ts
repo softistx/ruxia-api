@@ -146,7 +146,9 @@ describe("the persona avatars over /media", () => {
           record: async () => {
             throw new Error("db down");
           },
+          forget: async () => {},
         },
+        warn: () => {},
         throttle: unthrottled,
       },
       bucket,

@@ -6,7 +6,7 @@ import {
 } from "@softistx/mongo";
 import { z } from "zod";
 import { accountId, actors } from "../../../shared/actors";
-import { attachmentPart } from "../../attachments/attachments.model";
+import { attachmentPart } from "../../attachments";
 
 export const messageRoles = ["user", "assistant"] as const;
 export type MessageRole = (typeof messageRoles)[number];

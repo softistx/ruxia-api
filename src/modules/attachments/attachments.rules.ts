@@ -21,6 +21,11 @@ export const acceptedTypes = [...imageTypes, pdfType, ...textTypes];
 
 // The most bytes of an image and of any other file.
 export const IMAGE_MAX_BYTES = 10 * MiB;
+
+// A GIF is stored as sent (the image library takes no GIF), so it is held to
+// Claude's own per-image limit.
+export const GIF_MAX_BYTES = 5 * MiB;
+export const gifType = "image/gif";
 export const FILE_MAX_BYTES = 20 * MiB;
 
 // How many files a member may hold, linked ones included.
@@ -30,6 +35,17 @@ export const attachmentQuota = 200;
 // kept.
 export const MAX_PER_MESSAGE = 10;
 export const UNLINKED_TTL_MS = 24 * 60 * 60 * 1000;
+
+// The longer side of a stored image, in pixels: an upload is re-encoded to fit,
+// so one stays well under a provider's per-image limit (Claude: 5 MB).
+export const IMAGE_MAX_SIDE = 1568;
+
+// The raw bytes of files one model request may carry (images and PDFs, newest
+// first): base64 grows them by a third, and Claude's request limit is 32 MB.
+export const REQUEST_BYTES_BUDGET = 20 * MiB;
+
+// How many files are read from the bucket at once for one request.
+export const READ_CONCURRENCY = 4;
 
 // The characters of a text file the model reads (about 25 000 tokens).
 export const TEXT_LIMIT = 100_000;
@@ -42,21 +58,16 @@ export function kindOfType(type: string): AttachmentKind | undefined {
   return known(textTypes) ? "text" : undefined;
 }
 
-// The most bytes a file of this kind takes.
-export const maxBytesOf = (kind: AttachmentKind) =>
-  kind === "image" ? IMAGE_MAX_BYTES : FILE_MAX_BYTES;
-
-// The text of bytes that are valid UTF-8 with no NUL byte (a binary file is
-// not text); undefined for anything else. The decoder is strict, so one
-// invalid sequence refuses the whole file.
-export function utf8Text(bytes: Uint8Array): string | undefined {
-  if (bytes.includes(0)) return undefined;
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return undefined;
-  }
+// The most bytes an upload of this content type takes.
+export function maxBytesOf(type: string) {
+  if (type === gifType) return GIF_MAX_BYTES;
+  return kindOfType(type) === "image" ? IMAGE_MAX_BYTES : FILE_MAX_BYTES;
 }
+
+// Whether an upload of this type is re-encoded into the one `full` rendition
+// (every image but a GIF).
+export const isRendered = (type: string) =>
+  kindOfType(type) === "image" && type !== gifType;
 
 // A text cut at `limit` characters, never inside a surrogate pair.
 export function boundedText(text: string, limit = TEXT_LIMIT) {

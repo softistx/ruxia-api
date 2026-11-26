@@ -1,4 +1,4 @@
-import type { AttachmentsService } from "../attachments/services/attachments.service";
+import type { AttachmentsService } from "../attachments";
 import type { BudgetsService } from "../budgets/budgets.service";
 import type { ModelsService } from "../models";
 import type { PersonasService } from "../personas";

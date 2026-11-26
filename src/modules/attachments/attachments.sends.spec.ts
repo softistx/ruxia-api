@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { fakeModel } from "@softistx/ai-testing";
+import type { ObjectId } from "mongodb";
 import { adaptersByModel } from "~/ai";
 import { authApp } from "~/auth";
 import { clearBudgets, spent } from "~/budgets";
@@ -7,7 +8,8 @@ import { memberOf, sonnet } from "~/conversations";
 import { memoryBucket, png } from "~/media";
 import { memoryStatuses, ollamaUp } from "~/statuses";
 import { appMongo } from "../../config/db";
-import { attachmentPlace } from "./attachments.media";
+import type { MessageDocument } from "../conversations";
+import { filePlace } from "./attachments.media";
 
 const kit = authApp();
 const haiku = "claude-haiku-5-5";
@@ -56,7 +58,9 @@ async function uploaded(
   },
 ) {
   const key = crypto.randomUUID();
-  await bucket.put(attachmentPlace(key), file.body, { type: file.mime });
+  await bucket.put(filePlace({ key, mime: file.mime }), file.body, {
+    type: file.mime,
+  });
   return appMongo.as(ada.id).db.attachments.create({
     ownerId: ada.id,
     key,
@@ -146,7 +150,9 @@ describe("a send with attachments", () => {
     const request = model.requests[0];
     expect(partTypes(request)).toEqual(["text", "image", "document", "text"]);
     const text = request?.messages[0]?.parts.at(-1);
-    expect(text).toMatchObject({ text: 'File "notes.txt":\nline one' });
+    expect(text).toMatchObject({
+      text: '\n\nFile "notes.txt":\nline one',
+    });
     const linked = await appMongo.db.attachments.findMany({
       filter: { ownerId: ada.id },
     });
@@ -332,13 +338,127 @@ describe("the model context", () => {
         summaries.push(messages.length);
         return "folded";
       },
-      expand: async (parts) =>
-        await ada.attachments.expand(parts, {
-          provider: "anthropic",
-          sees: true,
-        }),
+      expand: (lists) =>
+        ada.attachments.expand(lists, { provider: "anthropic", sees: true }),
     });
     expect(summaries).toEqual([]);
     expect(JSON.stringify(context.messages)).toContain("document");
+  });
+
+  test("a record whose file is gone from the bucket is a note and the run still ends DONE", async () => {
+    const { bucket, objects } = memoryBucket();
+    const model = fakeModel([{ text: "ok", usage }]);
+    const ada = await memberOf(kit, {
+      media: bucket,
+      adapters: adaptersByModel({
+        [sonnet]: model,
+        [haiku]: fakeModel([{ object: { title: "T" } }]),
+      }),
+    });
+    const id = await conversationOf(ada);
+    const file = await uploaded(ada, bucket, image());
+    objects.clear();
+    const sent = await ada.runs.send({
+      conversationId: id,
+      text: "Look",
+      attachmentIds: [String(file._id)],
+    });
+    await ada.runtime.settled(sent.runId);
+    expect((await ada.runMessages.ofRun(sent.runId))?.status).toBe("done");
+    expect(JSON.stringify(model.requests[0]?.messages)).toContain(
+      "no longer available",
+    );
+  });
+
+  test("the attachments of a fold's kept messages count, so many images do not force a near-total fold", async () => {
+    const ada = await memberOf(kit);
+    const id = await conversationOf(ada);
+    const conversation = await ada.conversations.find(id);
+    let parent: ObjectId | null = null;
+    for (let i = 0; i < 12; i += 1) {
+      const user = i % 2 === 0;
+      const made: MessageDocument = await appMongo.db.messages.create({
+        ownerId: ada.id,
+        conversationId: conversation._id,
+        parentId: parent,
+        role: user ? "user" : "assistant",
+        parts: user
+          ? [
+              { type: "text", text: "look" },
+              {
+                type: "attachment",
+                key: crypto.randomUUID(),
+                kind: "image",
+                name: `i${i}`,
+                mime: "image/webp",
+                bytes: 10,
+              },
+            ]
+          : [{ type: "text", text: "seen" }],
+        status: "done",
+      });
+      parent = made._id;
+    }
+    const path = await ada.messages.path(conversation, parent);
+    const summaries: number[] = [];
+    const context = await ada.messages.context(path, {
+      // Budget 20000 * 0.75 - 4096 = 10904: six images (9600) fit with the text.
+      window: 20_000,
+      systemTokens: 0,
+      summarize: async (messages) => {
+        summaries.push(messages.length);
+        return "folded";
+      },
+      expand: (lists) =>
+        ada.attachments.expand(lists, { provider: "anthropic", sees: true }),
+    });
+    expect(summaries).toEqual([]);
+    expect(context.messages).toHaveLength(12);
+  });
+
+  test("past what is left of the budget once the kept attachments count, the context is folded again", async () => {
+    const ada = await memberOf(kit);
+    const id = await conversationOf(ada);
+    const conversation = await ada.conversations.find(id);
+    let parent: ObjectId | null = null;
+    for (let i = 0; i < 14; i += 1) {
+      const user = i % 2 === 0;
+      const made: MessageDocument = await appMongo.db.messages.create({
+        ownerId: ada.id,
+        conversationId: conversation._id,
+        parentId: parent,
+        role: user ? "user" : "assistant",
+        parts: user
+          ? [
+              { type: "text", text: "look" },
+              {
+                type: "attachment",
+                key: crypto.randomUUID(),
+                kind: "pdf",
+                name: `d${i}`,
+                mime: "application/pdf",
+                bytes: 10,
+              },
+            ]
+          : [{ type: "text", text: "seen" }],
+        status: "done",
+      });
+      parent = made._id;
+    }
+    const path = await ada.messages.path(conversation, parent);
+    const summaries: number[] = [];
+    const context = await ada.messages.context(path, {
+      // 7 documents (21000) are far past 10904: the second fold keeps fewer.
+      window: 20_000,
+      systemTokens: 0,
+      summarize: async (messages) => {
+        summaries.push(messages.length);
+        return "folded";
+      },
+      expand: (lists) =>
+        ada.attachments.expand(lists, { provider: "anthropic", sees: true }),
+    });
+    expect(summaries).toHaveLength(1);
+    expect(context.messages.length).toBeLessThan(14);
   });
 });

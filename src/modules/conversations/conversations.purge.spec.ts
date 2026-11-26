@@ -31,7 +31,7 @@ type Member = Awaited<ReturnType<typeof memberOf>>;
 const purgeOf = (ports: Partial<PurgePorts> & Pick<PurgePorts, "media">) =>
   new ConversationsPurge({
     mongo: appMongo,
-    attachments: new AttachmentsPurge(appMongo, ports.media),
+    attachments: new AttachmentsPurge(appMongo, ports.media, () => {}),
     ticker: () => () => {},
     now: () => new Date(),
     intervalMs: 1,

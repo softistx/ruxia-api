@@ -27,7 +27,10 @@ without a request viewer, writes only `budgetAlerts`, and mails the member throu
 - **Single-item deletes**: `deleteConversation(id)` and `restoreConversation(id)`
   return the conversation (an app departure from the bulk form of the stack
   skills: soft delete with a 30-day restore, one item at a time, the UI needs the
-  entity for its undo).
+  entity for its undo). `deleteAttachment(id)` is single-item too: it is the UI's
+  per-chip remove of one unsent upload, answers the id, and is refused once a message
+  carries the file (Assumed, not answered: the recommended option, taken in the
+  night window).
 
 - **Coordination**: the ruxia session in `~/workspace/dev/ruxia/` coordinates; send it
   status, merges, blockers and owner questions with a recommended option.

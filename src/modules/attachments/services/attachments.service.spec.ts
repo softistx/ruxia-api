@@ -4,7 +4,7 @@ import { authApp } from "~/auth";
 import { memberOf, startedBy } from "~/conversations";
 import { memoryBucket } from "~/media";
 import { appMongo } from "../../../config/db";
-import { attachmentPlace } from "../attachments.media";
+import { attachmentPlace, filePlace } from "../attachments.media";
 
 const kit = authApp();
 const refused = (code: string) => ({ extensions: { code } });
@@ -117,7 +117,30 @@ describe("AttachmentsService: require", () => {
     });
   });
 
-  test("a file already in this conversation is allowed, and a repeated id is refused", async () => {
+  test("more than ten ids are refused whatever the SDL says", async () => {
+    const { ada } = await setup();
+    await expect(
+      ada.attachments.require(
+        Array.from({ length: 11 }, () => "x"),
+        new ObjectId(),
+      ),
+    ).rejects.toMatchObject({
+      extensions: { fields: [{ path: "attachmentIds" }] },
+    });
+  });
+
+  test("a repeated id is refused at the index of the repeat", async () => {
+    const { ada, upload } = await setup();
+    const file = await upload(ada);
+    const id = String(file._id);
+    await expect(
+      ada.attachments.require([id, id], new ObjectId()),
+    ).rejects.toMatchObject({
+      extensions: { fields: [{ path: "attachmentIds.1" }] },
+    });
+  });
+
+  test("a file already in this conversation is allowed", async () => {
     const { ada, upload } = await setup();
     const conversationId = new ObjectId();
     const inside = await upload(ada, {
@@ -136,52 +159,196 @@ describe("AttachmentsService: require", () => {
   });
 });
 
+const refOf = (file: {
+  key: string;
+  kind: "image" | "pdf" | "text";
+  mime: string;
+  name: string;
+  bytes: number;
+}) => ({
+  type: "attachment" as const,
+  key: file.key,
+  kind: file.kind,
+  name: file.name,
+  mime: file.mime,
+  bytes: file.bytes,
+});
+
+const claude = { provider: "anthropic" as const, sees: true };
+
 describe("AttachmentsService: expand", () => {
-  test("a file that is gone becomes a note, other parts pass through", async () => {
+  test("a file that is gone is a note, other parts pass through", async () => {
     const { ada } = await setup();
-    const out = await ada.attachments.expand(
+    const [out] = await ada.attachments.expand(
       [
-        { type: "text", text: "hi" },
-        {
-          type: "attachment",
-          key: crypto.randomUUID(),
-          kind: "image",
-          name: "x.png",
-          mime: "image/png",
-          bytes: 1,
-        },
-      ] as never,
-      { provider: "anthropic", sees: true },
+        [
+          { type: "text" },
+          refOf({
+            key: crypto.randomUUID(),
+            kind: "image",
+            name: "x.png",
+            mime: "image/png",
+            bytes: 1,
+          }),
+        ],
+      ],
+      claude,
     );
-    expect(out[0]).toEqual({ type: "text", text: "hi" });
-    expect(out[1]).toMatchObject({
+    expect(out?.[0]).toMatchObject({ type: "text" });
+    expect(out?.[1]).toMatchObject({
       text: expect.stringContaining("no longer available"),
     });
   });
 
-  test("the bytes of an image are read from the bucket as base64", async () => {
-    const { ada, upload } = await setup();
+  test("the bytes of an image are read from its rendition as base64", async () => {
+    const { ada, upload, bucket } = await setup();
     const file = await upload(ada, {
       kind: "image",
-      mime: "image/png",
-      name: "p.png",
+      mime: "image/webp",
+      name: "p.webp",
     });
-    const [part] = await ada.attachments.expand(
-      [
-        {
-          type: "attachment",
-          key: file.key,
-          kind: "image",
-          name: "p.png",
-          mime: "image/png",
-          bytes: 2,
-        },
-      ],
-      { provider: "ollama", sees: true },
-    );
+    await bucket.put(filePlace(file), new Uint8Array([1, 2]), {
+      type: "image/webp",
+    });
+    const [[part]] = (await ada.attachments.expand([[refOf(file)]], {
+      provider: "ollama",
+      sees: true,
+    })) as [[unknown]];
     expect(part).toEqual({
       type: "image",
-      source: { kind: "base64", mediaType: "image/png", data: "AQI=" },
+      source: { kind: "base64", mediaType: "image/webp", data: "AQI=" },
     });
+  });
+
+  test("a record whose object is gone from the bucket is a note, never a throw", async () => {
+    const { ada, upload, objects } = await setup();
+    const file = await upload(ada, {
+      kind: "image",
+      mime: "image/webp",
+      name: "p.webp",
+    });
+    objects.clear();
+    const [out] = await ada.attachments.expand([[refOf(file)]], claude);
+    expect(out?.[0]).toMatchObject({
+      text: expect.stringContaining("no longer available"),
+    });
+  });
+
+  test("past the request's byte budget the oldest files become notes, the newest are read", async () => {
+    const { ada, upload, bucket } = await setup();
+    const files = [];
+    for (let i = 0; i < 3; i += 1) {
+      const file = await upload(ada, {
+        kind: "image",
+        mime: "image/webp",
+        name: `i${i}.webp`,
+        bytes: 9 * 1024 * 1024,
+      });
+      await bucket.put(filePlace(file), new Uint8Array([i]), {
+        type: "image/webp",
+      });
+      files.push(file);
+    }
+    const out = await ada.attachments.expand(
+      files.map((file) => [refOf(file)]),
+      claude,
+    );
+    expect(out.map((parts) => parts[0]?.type)).toEqual([
+      "text",
+      "image",
+      "image",
+    ]);
+    expect(out[0]?.[0]).toMatchObject({
+      text: expect.stringContaining("request is too large"),
+    });
+  });
+
+  test("files are read four at a time", async () => {
+    const { ada, bucket } = await setup();
+    let running = 0;
+    let peak = 0;
+    const slow = {
+      ...bucket,
+      open: async (place: Parameters<typeof bucket.open>[0]) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await Bun.sleep(10);
+        running -= 1;
+        return bucket.open(place);
+      },
+    };
+    const reader = await memberOf(kit, { media: slow as never });
+    const files = [];
+    for (let i = 0; i < 9; i += 1) {
+      const file = await appMongo.as(reader.id).db.attachments.create({
+        ownerId: reader.id,
+        key: crypto.randomUUID(),
+        kind: "image",
+        mime: "image/webp",
+        bytes: 1,
+        name: `i${i}`,
+      });
+      await bucket.put(filePlace(file), new Uint8Array([1]), {
+        type: "image/webp",
+      });
+      files.push(file);
+    }
+    const out = await reader.attachments.expand(
+      files.map((f) => [refOf(f)]),
+      claude,
+    );
+    expect(out.every((parts) => parts[0]?.type === "image")).toBe(true);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(ada.id).toBeDefined();
+  });
+});
+
+describe("AttachmentsService: link", () => {
+  test("refuses outside a transaction, and when a file was linked meanwhile", async () => {
+    const { ada, upload } = await setup();
+    const file = await upload(ada);
+    const parts = [refOf(file)];
+    const conversationId = new ObjectId();
+    const noSession = { db: appMongo.db, session: undefined } as never;
+    await expect(
+      ada.attachments.link(noSession, parts, conversationId, new ObjectId()),
+    ).rejects.toMatchObject(refused("auth.errors.exhausted"));
+    await appMongo.db.attachments.raw.updateOne(
+      { _id: file._id },
+      { $set: { messageId: new ObjectId(), conversationId: new ObjectId() } },
+    );
+    await expect(
+      appMongo
+        .as(ada.id)
+        .transaction((tx) =>
+          ada.attachments.link(tx, parts, conversationId, new ObjectId()),
+        ),
+    ).rejects.toMatchObject(refused("validation.errors.invalid-input"));
+  });
+
+  test("links the unlinked files and leaves the ones already in the conversation", async () => {
+    const { ada, upload } = await setup();
+    const conversationId = new ObjectId();
+    const first = new ObjectId();
+    const inside = await upload(ada, { conversationId, messageId: first });
+    const free = await upload(ada);
+    const second = new ObjectId();
+    await appMongo
+      .as(ada.id)
+      .transaction((tx) =>
+        ada.attachments.link(
+          tx,
+          [refOf(inside), refOf(free)],
+          conversationId,
+          second,
+        ),
+      );
+    const after = await appMongo.db.attachments.findMany({
+      filter: { key: { $in: [inside.key, free.key] } },
+    });
+    const byKey = new Map(after.map((f) => [f.key, f]));
+    expect(String(byKey.get(inside.key)?.messageId)).toBe(String(first));
+    expect(String(byKey.get(free.key)?.messageId)).toBe(String(second));
   });
 });

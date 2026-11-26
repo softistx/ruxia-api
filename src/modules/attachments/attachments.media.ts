@@ -6,6 +6,7 @@ import {
   type MediaUploaded,
   mediaObjectKey,
 } from "@softistx/alxia-media";
+import { withImageRendition } from "@softistx/alxia-media/image";
 import type { Viewer } from "../../auth/viewer";
 import type { Throttle } from "../../limits/throttle";
 import { uploadThrottle } from "../../limits/uploads";
@@ -13,14 +14,16 @@ import type { AttachmentKind } from "./attachments.model";
 import {
   acceptedTypes,
   attachmentQuota,
-  boundedText,
   FILE_MAX_BYTES,
-  IMAGE_MAX_BYTES,
+  gifType,
+  IMAGE_MAX_SIDE,
+  isRendered,
   kindOfType,
   maxBytesOf,
-  utf8Text,
+  pdfType,
+  textTypes,
 } from "./attachments.rules";
-import { cleanName } from "./attachments.utils";
+import { boundedUtf8, cleanName } from "./attachments.utils";
 import type { AttachmentFiles } from "./services/attachment-files.service";
 
 // The name of the kind: the URL segment (`/media/attachments/<key>`) and the
@@ -29,9 +32,14 @@ export const attachmentsKindName = "attachments";
 
 // Where an attachment's file lives in the bucket: the one place that spells
 // it, for the read of a run and the purges.
-export const attachmentPlace = (key: MediaKey | string) => ({
-  key: mediaObjectKey(attachmentsKindName, key as MediaKey),
+// An image is stored as its one rendition (`full`), any other file as it came.
+export const attachmentPlace = (key: MediaKey | string, size?: string) => ({
+  key: mediaObjectKey(attachmentsKindName, key as MediaKey, size),
 });
+
+// The place of the file a record names.
+export const filePlace = (file: { key: string; mime: string }) =>
+  attachmentPlace(file.key, isRendered(file.mime) ? "full" : undefined);
 
 // What the kind's callbacks read: the base's viewer (src/http/context.ts).
 export type MediaViewer = { viewer: Viewer | null };
@@ -62,49 +70,65 @@ export function attachmentKind(ports: AttachmentPorts) {
     throttle: uploadThrottle(ports.throttle),
     quota: async ({ viewer }, { declared, type }) => {
       if (viewer === null) return true;
-      const kind = kindOfType(type);
-      if (kind !== undefined && declared !== undefined) {
-        if (declared > maxBytesOf(kind)) {
-          return { code: "too_large", status: 413 };
-        }
+      if (declared !== undefined && declared > maxBytesOf(type)) {
+        return { code: "too_large", status: 413 };
       }
       if ((await ports.files.count(viewer.id)) < attachmentQuota) return true;
       return { code: "quota_exceeded", status: 402 };
     },
     cacheControl: "private, no-cache",
+    // An image is re-encoded into one WebP of at most 1568 px a side and the
+    // upload itself is never stored: the stored picture is far under a
+    // provider's per-image limit and its EXIF and GPS data are dropped. It is read at `/media/attachments/<key>/full`
+    // (the bare key of an image is 404). PDFs and text files are kept as sent,
+    // and so is a GIF (@softistx/image decodes no GIF), held to 5 MiB.
+    keepOriginal: [pdfType, gifType, ...textTypes],
+    ...withImageRendition({
+      full: { fit: "inside", maxSide: IMAGE_MAX_SIDE },
+      format: "webp",
+      quality: 82,
+    }),
   });
 }
 
-// The text of a stored file: its bytes read back from the bucket.
-async function storedBytes(
-  bucket: Pick<MediaBucket, "open">,
-  key: string,
-): Promise<Uint8Array> {
+// What a text upload keeps: its content, bounded, read back from the bucket as
+// a stream. Not UTF-8 is refused 415, and the routes then remove the file.
+async function textOf(bucket: Pick<MediaBucket, "open">, key: string) {
   const opened = await bucket.open(attachmentPlace(key));
   if (opened === undefined) throw new Error("an upload is not in the bucket");
-  return new Response(opened.stream).bytes();
-}
-
-// What a text upload keeps: its content, bounded. Not UTF-8 is refused 415,
-// and the routes then remove the file.
-async function textOf(bucket: Pick<MediaBucket, "open">, key: string) {
-  const text = utf8Text(await storedBytes(bucket, key));
+  const text = await boundedUtf8(opened.stream);
   if (text === undefined) {
     throw new MediaRefusal("unsupported_type", { reason: "encoding" });
   }
-  return boundedText(text);
+  return text;
+}
+
+// The size and type of what is stored for an upload: an image's rendition.
+async function storedImage(
+  bucket: Pick<MediaBucket, "open">,
+  upload: MediaUploaded,
+) {
+  const rendition = upload.renditions[0];
+  const opened = await bucket.open(attachmentPlace(upload.key, "full"));
+  if (rendition === undefined || opened === undefined) {
+    throw new Error("an image rendition is not in the bucket");
+  }
+  await opened.stream.cancel();
+  return { mime: rendition.contentType, bytes: opened.size ?? 0 };
 }
 
 // What an attachment upload does once stored: checks what the routes could not
 // (an image past 10 MiB sent without a length, a text that is not UTF-8) and
 // remembers the file as its uploader's, so a send can link it and nobody else
-// can. A throw makes the routes remove what they just stored. The answer is
-// the key and what the UI shows of the file (`id` is what `sendMessage`
-// takes), never a URL.
+// can. The quota is counted again after the record (two uploads can pass the
+// check together). A throw makes the routes remove what they just stored. The
+// answer is the key and what the UI shows of the file (`id` is what
+// `sendMessage` takes), never a URL.
 export async function attachmentUploaded(
   ports: {
-    files: Pick<AttachmentFiles, "record">;
+    files: Pick<AttachmentFiles, "record" | "count" | "forget">;
     bucket: Pick<MediaBucket, "open">;
+    warn: (message: string) => void;
   },
   upload: MediaUploaded,
   { viewer, request }: MediaViewer & { request: Request },
@@ -112,31 +136,36 @@ export async function attachmentUploaded(
   if (viewer === null) throw new Error("an upload needs a viewer");
   const kind: AttachmentKind | undefined = kindOfType(upload.contentType);
   if (kind === undefined) throw new Error(`unexpected ${upload.contentType}`);
-  if (kind === "image" && upload.size > IMAGE_MAX_BYTES) {
-    throw new MediaRefusal("too_large", { limit: IMAGE_MAX_BYTES });
-  }
+  const limit = maxBytesOf(upload.contentType);
+  if (upload.size > limit) throw new MediaRefusal("too_large", { limit });
   const text =
     kind === "text" ? await textOf(ports.bucket, upload.key) : undefined;
+  const stored = isRendered(upload.contentType)
+    ? await storedImage(ports.bucket, upload)
+    : { mime: upload.contentType, bytes: upload.size };
   const name = cleanName(request.headers.get("x-file-name"));
   try {
     const file = await ports.files.record(viewer.id, {
       key: upload.key,
       kind,
-      mime: upload.contentType,
-      bytes: upload.size,
+      ...stored,
       name,
       ...(text && { extractedText: text.text, truncated: text.truncated }),
     });
+    if ((await ports.files.count(viewer.id)) > attachmentQuota) {
+      await ports.files.forget(file._id);
+      throw new MediaRefusal("quota_exceeded", { status: 402 });
+    }
     return {
       id: String(file._id),
       key: upload.key,
-      contentType: upload.contentType,
-      size: upload.size,
+      contentType: stored.mime,
+      size: stored.bytes,
       kind,
       name,
     };
   } catch (error) {
-    console.warn("attachment not recorded, its file is removed");
+    ports.warn("attachment not kept, its file is removed");
     throw error;
   }
 }

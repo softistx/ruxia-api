@@ -5,7 +5,7 @@ import type {
   TextPart,
 } from "@softistx/ai-core";
 import type { AttachmentDocument, AttachmentPart } from "./attachments.model";
-import { TEXT_LIMIT } from "./attachments.rules";
+import { boundedText, TEXT_LIMIT } from "./attachments.rules";
 
 // The name a client gave its file (`x-file-name`, percent-encoded), safe to
 // keep and show: no control character, trimmed, 200 characters at most;
@@ -55,55 +55,121 @@ export const readerOf = (model: {
   sees: model.provider === "anthropic" || model.capabilities.includes("vision"),
 });
 
-const note = (text: string): TextPart => ({ type: "text", text });
+// A block of text that starts a paragraph of its own: ai-ollama joins the text
+// parts of a message with nothing, so none may run into the member's text.
+const block = (text: string): TextPart => ({
+  type: "text",
+  text: `\n\n${text}`,
+});
 
 // The parts a text file becomes: its content under its name, bounded, with a
 // note when it was cut.
 function textParts(part: AttachmentPart, file: AttachmentDocument): Part[] {
   if (file.extractedText === null) {
-    return [note(`[File "${part.name}" has no readable text.]`)];
+    return [block(`[File "${part.name}" has no readable text.]`)];
   }
   const tail = file.truncated
     ? `\n[Truncated: only the first ${TEXT_LIMIT} characters of the file are shown.]`
     : "";
-  return [note(`File "${part.name}":\n${file.extractedText}${tail}`)];
+  return [block(`File "${part.name}":\n${file.extractedText}${tail}`)];
 }
 
-// What the model reads in place of one attachment reference. `bytes` reads the
-// file (called only when the model can take it). A file that is gone, or that
-// this model cannot read, becomes a short text note.
-export async function modelParts(
+// What a model request needs of one attachment's bytes: whether this reader
+// takes the file itself (an image it can see, a PDF Claude reads).
+export const needsBytes = (part: AttachmentPart, reader: Reader) =>
+  (part.kind === "image" && reader.sees) ||
+  (part.kind === "pdf" && reader.provider === "anthropic");
+
+// What `modelParts` is given of the file's bytes: the base64 read (undefined
+// when the bucket no longer holds the object) and whether the request's size
+// budget left it out.
+export type Loaded = { data: string | undefined; skipped: boolean };
+
+// What the model reads in place of one attachment reference. A file that is
+// gone (no record, or no object in the bucket), left out by the request's size
+// budget, or that this model cannot read, becomes a short text note.
+export function modelParts(
   part: AttachmentPart,
   file: AttachmentDocument | undefined,
   reader: Reader,
-  bytes: () => Promise<string>,
-): Promise<Part[]> {
+  loaded: Loaded,
+): Part[] {
   if (file === undefined) {
-    return [note(`[Attachment "${part.name}" is no longer available.]`)];
+    return [block(`[Attachment "${part.name}" is no longer available.]`)];
   }
   if (part.kind === "text") return textParts(part, file);
-  if (part.kind === "image") {
-    if (!reader.sees) {
-      return [
-        note(`[Image "${part.name}" omitted: this model cannot see images.]`),
-      ];
+  if (part.kind === "image" && !reader.sees) {
+    return [
+      block(`[Image "${part.name}" omitted: this model cannot see images.]`),
+    ];
+  }
+  if (part.kind === "pdf" && reader.provider !== "anthropic") {
+    if (file.extractedText !== null) return textParts(part, file);
+    return [
+      block(`[PDF "${part.name}" omitted: this model cannot read PDF files.]`),
+    ];
+  }
+  if (loaded.skipped) {
+    return [
+      block(`[Attachment "${part.name}" omitted: the request is too large.]`),
+    ];
+  }
+  if (loaded.data === undefined) {
+    return [block(`[Attachment "${part.name}" is no longer available.]`)];
+  }
+  const source = {
+    kind: "base64" as const,
+    mediaType: part.mime,
+    data: loaded.data,
+  };
+  if (part.kind === "image") return [{ type: "image", source } as ImagePart];
+  return [{ type: "document", source, title: part.name } as DocumentPart];
+}
+
+// Runs `work` over `items`, at most `limit` at a time, and answers the results
+// in the order of `items`.
+export async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const at = next++;
+      results[at] = await work(items[at] as T);
     }
-    const image: ImagePart = {
-      type: "image",
-      source: { kind: "base64", mediaType: part.mime, data: await bytes() },
-    };
-    return [image];
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, lane),
+  );
+  return results;
+}
+
+// A text file's content from its bytes, bounded: the first `limit` characters
+// and whether there were more. Every byte is checked, in streaming mode so
+// the buffer stays small: strict UTF-8 (an invalid or cut sequence), and no
+// NUL byte (a binary file is not text). Undefined when either fails.
+export async function boundedUtf8(
+  stream: AsyncIterable<Uint8Array>,
+  limit = TEXT_LIMIT,
+): Promise<{ text: string; truncated: boolean } | undefined> {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let text = "";
+  let more = false;
+  const take = (piece: string) => {
+    if (piece.includes("\u0000")) throw new Error("binary");
+    if (text.length < limit) text += piece;
+    else if (piece.length > 0) more = true;
+  };
+  try {
+    for await (const chunk of stream)
+      take(decoder.decode(chunk, { stream: true }));
+    take(decoder.decode());
+  } catch {
+    return undefined;
   }
-  if (reader.provider === "anthropic") {
-    const document: DocumentPart = {
-      type: "document",
-      source: { kind: "base64", mediaType: part.mime, data: await bytes() },
-      title: part.name,
-    };
-    return [document];
-  }
-  if (file.extractedText !== null) return textParts(part, file);
-  return [
-    note(`[PDF "${part.name}" omitted: this model cannot read PDF files.]`),
-  ];
+  const bounded = boundedText(text, limit);
+  return { text: bounded.text, truncated: bounded.truncated || more };
 }

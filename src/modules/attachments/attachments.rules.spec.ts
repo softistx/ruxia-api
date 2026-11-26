@@ -4,11 +4,12 @@ import {
   boundedText,
   estimateAttachment,
   FILE_MAX_BYTES,
+  GIF_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  isRendered,
   kindOfType,
   maxBytesOf,
   TEXT_LIMIT,
-  utf8Text,
 } from "./attachments.rules";
 
 describe("kindOfType", () => {
@@ -21,21 +22,14 @@ describe("kindOfType", () => {
     expect(kindOfType("text/html")).toBeUndefined();
   });
 
-  test("an image takes 10 MiB and any other file 20", () => {
-    expect(maxBytesOf("image")).toBe(IMAGE_MAX_BYTES);
-    expect(maxBytesOf("pdf")).toBe(FILE_MAX_BYTES);
-    expect(maxBytesOf("text")).toBe(FILE_MAX_BYTES);
-  });
-});
-
-describe("utf8Text", () => {
-  test("reads valid UTF-8, accents and emoji included", () => {
-    expect(utf8Text(new TextEncoder().encode("héllo 🎉"))).toBe("héllo 🎉");
-  });
-
-  test("refuses an invalid sequence and a binary file", () => {
-    expect(utf8Text(Uint8Array.of(0x68, 0xff, 0xfe))).toBeUndefined();
-    expect(utf8Text(Uint8Array.of(0x68, 0x00, 0x69))).toBeUndefined();
+  test("an image takes 10 MiB, a GIF 5 and any other file 20; only a GIF is stored as sent", () => {
+    expect(maxBytesOf("image/png")).toBe(IMAGE_MAX_BYTES);
+    expect(maxBytesOf("image/gif")).toBe(GIF_MAX_BYTES);
+    expect(maxBytesOf("application/pdf")).toBe(FILE_MAX_BYTES);
+    expect(maxBytesOf("text/plain")).toBe(FILE_MAX_BYTES);
+    expect(isRendered("image/jpeg")).toBe(true);
+    expect(isRendered("image/gif")).toBe(false);
+    expect(isRendered("application/pdf")).toBe(false);
   });
 });
 

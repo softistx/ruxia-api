@@ -20,7 +20,9 @@ import type { AvatarsService } from "./personas/services/avatars.service";
 export type MediaPorts = {
   avatars: Pick<AvatarsService, "mayRead" | "count" | "record">;
   exports: Pick<ExportFiles, "mayRead">;
-  attachments: Pick<AttachmentFiles, "mayRead" | "count" | "record">;
+  attachments: Pick<AttachmentFiles, "mayRead" | "count" | "record" | "forget">;
+  // Where a failed upload says so (a log line, no content).
+  warn: (message: string) => void;
   throttle: Pick<Throttle, "uploads">;
 };
 
@@ -41,7 +43,7 @@ export function appMedia(ports: MediaPorts, bucket: MediaBucket) {
       uploaded: (uploaded, ctx) => {
         if (uploaded.kind === attachmentsKindName) {
           return attachmentUploaded(
-            { files: ports.attachments, bucket },
+            { files: ports.attachments, bucket, warn: ports.warn },
             uploaded,
             ctx,
           );

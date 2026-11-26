@@ -8,7 +8,7 @@ import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import { invalidInput } from "../../../shared/errors";
 import { toConnection } from "../../../shared/pagination";
-import { isAttachment } from "../../attachments/attachments.utils";
+import { type Expandable, isAttachment } from "../../attachments";
 import { siblingsOf } from "../conversations.branches.utils";
 import { invalidCursor, messageNotFound } from "../conversations.errors";
 import { compactionBudget, parentIssues } from "../conversations.rules";
@@ -140,25 +140,25 @@ export class MessagesService {
   // message that has one, and the messages after it, folded again (and the new
   // summary stored on the message it covers through) when they pass the
   // budget. The summary holds for every branch below that message. The fold
-  // sees an attachment as its name, and the budget is cut by what the kept
-  // messages' attachments are estimated to add; `expand` then gives the model
-  // the real parts of the messages that carry one.
+  // sees an attachment as its name; `expand` then gives the model the real
+  // parts of the kept messages that carry one.
   async context(
     path: readonly MessageDocument[],
     options: {
       window: number;
       systemTokens: number;
       summarize: (messages: Message[]) => Promise<string>;
-      expand: (parts: readonly { type: string }[]) => Promise<Part[]>;
+      expand: (lists: readonly Expandable[]) => Promise<Part[][]>;
     },
   ) {
     const { summary, start } = contextOf(path);
-    const reserved = attachmentTokens(path.slice(start));
-    const result = await compact(toStored(path).slice(start), {
-      budget: compactionBudget(options.window, options.systemTokens + reserved),
-      summarize: options.summarize,
-      ...(summary && { summary: { text: summary.text } }),
-    });
+    const result = await this.folded(
+      toStored(path).slice(start),
+      path,
+      summary,
+      compactionBudget(options.window, options.systemTokens),
+      options.summarize,
+    );
     if (result.summary !== undefined && result.throughMessageId !== undefined) {
       await this.messages.update(result.throughMessageId, {
         contextSummary: {
@@ -174,25 +174,54 @@ export class MessagesService {
     };
   }
 
+  // Folds to the budget. The attachments of the messages the fold keeps are
+  // only then estimated (`attachmentTokens`): when they push the context past
+  // the budget it is folded once more, to what is left of it. Folded
+  // messages' attachments cost nothing, so a conversation that carried many
+  // files long ago is not folded for them.
+  private async folded(
+    stored: StoredMessage[],
+    path: readonly MessageDocument[],
+    summary: { text: string } | null,
+    budget: number,
+    summarize: (messages: Message[]) => Promise<string>,
+  ) {
+    const run = (limit: number) =>
+      compact(stored, {
+        budget: limit,
+        summarize,
+        ...(summary && { summary: { text: summary.text } }),
+      });
+    const first = await run(budget);
+    const ids = new Set(first.messages.map((message) => message.id));
+    const reserved = attachmentTokens(
+      path.filter((message) => ids.has(String(message._id))),
+    );
+    if (reserved === 0 || first.tokens + reserved <= budget) return first;
+    return run(Math.max(0, budget - reserved));
+  }
+
   // The messages the model reads: those that carry an attachment get its real
-  // parts, the others are as the fold left them.
+  // parts (one `expand` for the whole request, so its size budget is shared),
+  // the others are as the fold left them.
   private async withFiles(
     kept: readonly StoredMessage[],
     path: readonly MessageDocument[],
-    expand: (parts: readonly { type: string }[]) => Promise<Part[]>,
+    expand: (lists: readonly Expandable[]) => Promise<Part[][]>,
   ): Promise<Message[]> {
     const byId = new Map(path.map((message) => [String(message._id), message]));
-    const out: Message[] = [];
-    for (const stored of kept) {
-      const doc = byId.get(stored.id);
-      const carries = doc?.parts.some(isAttachment) === true;
-      out.push(
-        doc !== undefined && carries
-          ? { role: doc.role, parts: await expand(doc.parts) }
-          : stored.message,
-      );
-    }
-    return out;
+    const docs = kept.map((stored) => byId.get(stored.id));
+    const carrying = docs.filter(
+      (doc) => doc?.parts.some(isAttachment) === true,
+    ) as MessageDocument[];
+    const expanded = await expand(carrying.map((doc) => doc.parts));
+    return kept.map((stored, index) => {
+      const at = carrying.indexOf(docs[index] as MessageDocument);
+      const doc = docs[index];
+      return doc !== undefined && at !== -1
+        ? { role: doc.role, parts: expanded[at] as Part[] }
+        : stored.message;
+    });
   }
 
   // One of the viewer's messages, in a conversation that is still theirs and

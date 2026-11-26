@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { AttachmentDocument, AttachmentPart } from "./attachments.model";
 import {
+  boundedUtf8,
   cleanName,
   isAttachment,
+  mapLimit,
   modelParts,
+  needsBytes,
   partOf,
   readerOf,
   standIn,
@@ -33,10 +36,9 @@ const part = (kind: AttachmentPart["kind"], mime: string): AttachmentPart => ({
 const claude = readerOf({ provider: "anthropic", capabilities: [] });
 const blind = readerOf({ provider: "ollama", capabilities: ["tools"] });
 const seeing = readerOf({ provider: "ollama", capabilities: ["vision"] });
-const never = async () => {
-  throw new Error("the file must not be read");
-};
-const bytes = async () => "QUJD";
+const data = { data: "QUJD", skipped: false };
+const gone = { data: undefined, skipped: false };
+const unread = { data: undefined, skipped: true };
 
 describe("cleanName", () => {
   test("decodes, strips control characters and bounds the name", () => {
@@ -72,12 +74,10 @@ describe("references", () => {
 });
 
 describe("modelParts", () => {
-  test("an image is an image part for Claude and for a vision model", async () => {
+  test("an image is an image part for Claude and for a vision model", () => {
     const image = part("image", "image/png");
     for (const reader of [claude, seeing]) {
-      expect(
-        await modelParts(image, file({ kind: "image" }), reader, bytes),
-      ).toEqual([
+      expect(modelParts(image, file({ kind: "image" }), reader, data)).toEqual([
         {
           type: "image",
           source: { kind: "base64", mediaType: "image/png", data: "QUJD" },
@@ -86,67 +86,134 @@ describe("modelParts", () => {
     }
   });
 
-  test("an image a model cannot see is dropped with a note, unread", async () => {
-    const out = await modelParts(
-      part("image", "image/png"),
-      file(),
-      blind,
-      never,
-    );
+  test("an image a model cannot see is dropped with a note that starts a paragraph", () => {
+    const out = modelParts(part("image", "image/png"), file(), blind, data);
     expect(out).toEqual([
       {
         type: "text",
-        text: '[Image "f" omitted: this model cannot see images.]',
+        text: '\n\n[Image "f" omitted: this model cannot see images.]',
       },
     ]);
   });
 
-  test("a PDF is a document part for Claude and a note elsewhere", async () => {
+  test("a PDF is a document part for Claude and a note elsewhere", () => {
     const pdf = part("pdf", "application/pdf");
-    expect(await modelParts(pdf, file({ kind: "pdf" }), claude, bytes)).toEqual(
-      [
-        {
-          type: "document",
-          source: {
-            kind: "base64",
-            mediaType: "application/pdf",
-            data: "QUJD",
-          },
-          title: "f",
-        },
-      ],
-    );
-    const note = await modelParts(
+    expect(modelParts(pdf, file({ kind: "pdf" }), claude, data)).toEqual([
+      {
+        type: "document",
+        source: { kind: "base64", mediaType: "application/pdf", data: "QUJD" },
+        title: "f",
+      },
+    ]);
+    const note = modelParts(
       pdf,
       file({ kind: "pdf", extractedText: null }),
       seeing,
-      never,
+      data,
     );
     expect(note[0]).toMatchObject({
       text: expect.stringContaining("cannot read PDF"),
     });
   });
 
-  test("a text file is sent as text, with a note when it was cut", async () => {
+  test("a text file is sent as a block of its own, with a note when it was cut", () => {
     const text = part("text", "text/plain");
-    expect(await modelParts(text, file(), blind, never)).toEqual([
-      { type: "text", text: 'File "f":\nhello' },
+    expect(modelParts(text, file(), blind, data)).toEqual([
+      { type: "text", text: '\n\nFile "f":\nhello' },
     ]);
-    const cut = await modelParts(text, file({ truncated: true }), blind, never);
+    const cut = modelParts(text, file({ truncated: true }), blind, data);
     expect(cut[0]).toMatchObject({
       text: expect.stringContaining("Truncated"),
     });
   });
 
-  test("a file that is gone is a note", async () => {
-    const out = await modelParts(
-      part("text", "text/plain"),
-      undefined,
-      claude,
-      never,
-    );
-    expect(out[0]).toMatchObject({
+  test("a file gone from the records or the bucket is a note, and so is one the budget left out", () => {
+    const image = part("image", "image/png");
+    const missing = modelParts(image, undefined, claude, data);
+    expect(missing[0]).toMatchObject({
       text: expect.stringContaining("no longer available"),
     });
+    const noObject = modelParts(image, file({ kind: "image" }), claude, gone);
+    expect(noObject[0]).toMatchObject({
+      text: expect.stringContaining("no longer available"),
+    });
+    const over = modelParts(image, file({ kind: "image" }), claude, unread);
+    expect(over[0]).toMatchObject({
+      text: expect.stringContaining("request is too large"),
+    });
+  });
+});
+
+describe("needsBytes", () => {
+  test("only a file the reader takes itself is read", () => {
+    const image = part("image", "image/png");
+    const pdf = part("pdf", "application/pdf");
+    expect([claude, seeing, blind].map((r) => needsBytes(image, r))).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect([claude, seeing].map((r) => needsBytes(pdf, r))).toEqual([
+      true,
+      false,
+    ]);
+    expect(needsBytes(part("text", "text/plain"), claude)).toBe(false);
+  });
+});
+
+describe("mapLimit", () => {
+  test("runs at most `limit` at a time and keeps the order of the items", async () => {
+    let running = 0;
+    let peak = 0;
+    const out = await mapLimit([1, 2, 3, 4, 5, 6, 7, 8, 9], 4, async (n) => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await Bun.sleep(5);
+      running -= 1;
+      return n * 2;
+    });
+    expect(out).toEqual([2, 4, 6, 8, 10, 12, 14, 16, 18]);
+    expect(peak).toBe(4);
+  });
+
+  test("no items is no work", async () => {
+    expect(await mapLimit([], 4, async () => 1)).toEqual([]);
+  });
+});
+
+const streamOf = (...chunks: Uint8Array[]) =>
+  (async function* () {
+    yield* chunks;
+  })();
+const bytesOf = (text: string) => new TextEncoder().encode(text);
+
+describe("boundedUtf8", () => {
+  test("reads valid UTF-8 split anywhere, even inside a character", async () => {
+    const all = bytesOf("héllo 🎉");
+    const out = await boundedUtf8(
+      streamOf(all.slice(0, 2), all.slice(2, 9), all.slice(9)),
+    );
+    expect(out).toEqual({ text: "héllo 🎉", truncated: false });
+  });
+
+  test("keeps the first characters and says there was more, still checking the rest", async () => {
+    const out = await boundedUtf8(
+      streamOf(bytesOf("abcdef"), bytesOf("ghij")),
+      4,
+    );
+    expect(out).toEqual({ text: "abcd", truncated: true });
+    expect(
+      await boundedUtf8(streamOf(bytesOf("abcdef"), Uint8Array.of(0xff)), 4),
+    ).toBeUndefined();
+  });
+
+  test("refuses an invalid sequence, a cut character at the end and a NUL byte", async () => {
+    expect(
+      await boundedUtf8(streamOf(Uint8Array.of(0x68, 0xff))),
+    ).toBeUndefined();
+    expect(await boundedUtf8(streamOf(Uint8Array.of(0xc3)))).toBeUndefined();
+    expect(
+      await boundedUtf8(streamOf(Uint8Array.of(0x68, 0, 0x69))),
+    ).toBeUndefined();
   });
 });

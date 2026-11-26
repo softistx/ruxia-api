@@ -93,7 +93,9 @@ if (env.OLLAMA_BASE_URL === undefined) {
 const purge = new ConversationsPurge({
   mongo: appMongo,
   media: serverMedia,
-  attachments: new AttachmentsPurge(appMongo, serverMedia),
+  attachments: new AttachmentsPurge(appMongo, serverMedia, (message) =>
+    console.warn(message),
+  ),
   ticker: intervalTicker,
   now: () => new Date(),
   intervalMs: PURGE_INTERVAL_MS,

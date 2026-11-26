@@ -1,8 +1,7 @@
 import type { MediaBucket } from "@softistx/alxia-media";
 import type { ObjectId } from "mongodb";
 import type { AppMongo } from "../../config/db";
-import type { AttachmentsPurge } from "../attachments/attachments.purge";
-import { UNLINKED_TTL_MS } from "../attachments/attachments.rules";
+import { type AttachmentsPurge, UNLINKED_TTL_MS } from "../attachments";
 import type { Ticker } from "../models";
 import { exportPlace } from "./conversations.media";
 import { PURGE_HOLD_MS, RESTORE_WINDOW_MS } from "./conversations.rules";

@@ -4,8 +4,8 @@ import type { Viewer } from "../../../auth/viewer";
 import type { AppMongo } from "../../../config/db";
 import { exhausted } from "../../../shared/errors";
 import { retryWriteConflicts } from "../../../shared/retry";
-import type { AttachmentPart } from "../../attachments/attachments.model";
-import type { AttachmentsService } from "../../attachments/services/attachments.service";
+import type { Tx } from "../../../shared/tx";
+import type { AttachmentPart, AttachmentsService } from "../../attachments";
 import { runInProgress } from "../conversations.errors";
 import {
   endMessage,
@@ -49,11 +49,6 @@ export type Exchange = {
     }
   | { user: MessageDocument }
 );
-
-// The transaction a write runs in.
-type Tx = Parameters<
-  Parameters<ReturnType<AppMongo["as"]>["transaction"]>[0]
->[0];
 
 // The messages a run writes, for one request: the exchange a send inserts,
 // the end a run gives its answer, and the release of a run that cannot end.

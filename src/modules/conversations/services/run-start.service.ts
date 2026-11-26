@@ -9,8 +9,7 @@ import type { Viewer } from "../../../auth/viewer";
 import type { Throttle } from "../../../limits/throttle";
 import type { Background } from "../../../shared/background";
 import { unavailable } from "../../../shared/errors";
-import type { AttachmentPart } from "../../attachments/attachments.model";
-import { readerOf } from "../../attachments/attachments.utils";
+import { type AttachmentPart, readerOf } from "../../attachments";
 import type { ModelAdapters } from "../conversations.adapters";
 import { limitedSend, personaUnavailable } from "../conversations.errors";
 import type {
@@ -181,7 +180,7 @@ export class RunStartService {
       window: model.contextWindow,
       systemTokens: estimateTokens(base.map((block) => block.text).join("\n")),
       summarize: summarizeWith(adapter),
-      expand: (parts) => attachments.expand(parts, readerOf(model)),
+      expand: (lists) => attachments.expand(lists, readerOf(model)),
     });
     const run = runAgent({
       model: adapter,

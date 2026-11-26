@@ -98,6 +98,7 @@ function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
     appMongo,
     { ...memoryBucket().bucket, ...options.media },
     viewer,
+    options.warn ?? (() => {}),
   );
   const runMessages = new RunMessagesService(
     appMongo,

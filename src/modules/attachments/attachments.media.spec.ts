@@ -5,7 +5,9 @@ import { memberOf, startedBy } from "~/conversations";
 import { memoryBucket, png } from "~/media";
 import { countingThrottle } from "~/throttle";
 import { appMongo } from "../../config/db";
+import { attachmentUploaded } from "./attachments.media";
 import { attachmentQuota, IMAGE_MAX_BYTES } from "./attachments.rules";
+import { AttachmentFiles } from "./services/attachment-files.service";
 
 const origin = "https://ui.ruxia.test/media/attachments";
 type Kit = ReturnType<typeof authApp>;
@@ -49,7 +51,7 @@ describe("the attachments over /media", () => {
     expect(image.status).toBe(200);
     const body = (await image.json()) as Record<string, string>;
     expect(body).toMatchObject({
-      contentType: "image/png",
+      contentType: "image/webp",
       kind: "image",
       name: "café.png",
     });
@@ -61,9 +63,12 @@ describe("the attachments over /media", () => {
       "name",
       "size",
     ]);
-    expect(objects.has(`attachments/${body["key"]}`)).toBe(true);
-    const got = await read(kit, ada.token, `${body["key"]}`);
+    // Only the re-encoded picture is stored, never the upload.
+    expect([...objects.keys()]).toEqual([`attachments/${body["key"]}/full`]);
+    expect((await read(kit, ada.token, `${body["key"]}`)).status).toBe(404);
+    const got = await read(kit, ada.token, `${body["key"]}/full`);
     expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("image/webp");
     expect(got.headers.get("cache-control")).toBe("private, no-cache");
     expect((await upload(kit, ada.token, pdf, "application/pdf")).status).toBe(
       200,
@@ -80,6 +85,44 @@ describe("the attachments over /media", () => {
       conversationId: null,
       messageId: null,
     });
+  });
+
+  test("a large image is re-encoded to at most 1568 px a side and stored far under 5 MB; a GIF is stored as sent, up to 5 MiB", async () => {
+    const { bucket, objects } = memoryBucket();
+    const kit = authApp(undefined, { media: bucket });
+    const ada = await signedInAccount(kit);
+    const big = await new Bun.Image(png).resize(4000, 3000).png().bytes();
+    const sent = await upload(kit, ada.token, big, "image/png");
+    expect(sent.status).toBe(200);
+    const { key, size } = (await sent.json()) as { key: string; size: number };
+    const stored = objects.get(`attachments/${key}/full`);
+    expect(stored?.type).toBe("image/webp");
+    expect(size).toBe(stored?.bytes.byteLength as number);
+    expect(size).toBeLessThan(5 * 1024 * 1024);
+    const meta = await new Bun.Image(stored?.bytes as Uint8Array).metadata();
+    expect(Math.max(meta.width, meta.height)).toBe(1568);
+    expect(meta.format).toBe("webp");
+    const record = await appMongo.db.attachments.findFirst({ key });
+    expect(record).toMatchObject({ mime: "image/webp", bytes: size });
+    const gif = new Uint8Array(
+      Buffer.from(
+        "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+        "base64",
+      ),
+    );
+    const still = await upload(kit, ada.token, gif, "image/gif", "a.gif");
+    expect(still.status).toBe(200);
+    const stillBody = (await still.json()) as {
+      key: string;
+      contentType: string;
+    };
+    expect(stillBody.contentType).toBe("image/gif");
+    expect(objects.has(`attachments/${stillBody.key}`)).toBe(true);
+    const bigGif = new Uint8Array(5 * 1024 * 1024 + 1);
+    bigGif.set(gif);
+    expect((await upload(kit, ada.token, bigGif, "image/gif")).status).toBe(
+      413,
+    );
   });
 
   test("the type is sniffed: a PDF or an image that is not one is refused, and so is any other type", async () => {
@@ -202,6 +245,8 @@ describe("the attachments over /media", () => {
     const ada = await signedInAccount(kit);
     const warn = console.warn;
     console.warn = () => {};
+    await appMongo.db.attachments.raw.dropIndex("spec_block").catch(() => {});
+    await appMongo.db.attachments.raw.deleteMany({ name: "dup" });
     // A unique index no real upload meets makes the record's write fail.
     await appMongo.db.attachments.raw.createIndex(
       { name: 1 },
@@ -225,5 +270,50 @@ describe("the attachments over /media", () => {
     await appMongo.db.attachments.raw.deleteOne({ name: "dup" });
     expect(response.status).toBeGreaterThanOrEqual(400);
     expect(objects.size).toBe(0);
+  });
+
+  test("an upload that passes the quota check together with another is refused after its record, and nothing is left", async () => {
+    const { bucket, objects } = memoryBucket();
+    const kit = authApp(undefined, { media: bucket });
+    const ada = await signedInAccount(kit);
+    for (let i = 0; i < attachmentQuota; i += 1) {
+      await appMongo.as(ada.userId).db.attachments.create({
+        ownerId: ada.userId,
+        key: crypto.randomUUID(),
+        kind: "text",
+        mime: "text/plain",
+        bytes: 1,
+        name: "n",
+      });
+    }
+    const kept = await appMongo.db.attachments.count({ ownerId: ada.userId });
+    const files = new AttachmentFiles(appMongo);
+    const warnings: string[] = [];
+    const key = crypto.randomUUID();
+    await bucket.put({ key: `attachments/${key}` }, new Uint8Array([104]), {
+      type: "text/plain",
+    });
+    await expect(
+      attachmentUploaded(
+        { files, bucket, warn: (m) => warnings.push(m) },
+        {
+          kind: "attachments",
+          key,
+          contentType: "text/plain",
+          size: 1,
+          sizes: [],
+          renditions: [],
+        },
+        {
+          viewer: { id: ada.userId, role: "member" } as never,
+          request: new Request("https://ui.ruxia.test/media/attachments"),
+        },
+      ),
+    ).rejects.toMatchObject({ status: 402 });
+    expect(await appMongo.db.attachments.count({ ownerId: ada.userId })).toBe(
+      kept,
+    );
+    expect(warnings).toHaveLength(1);
+    expect(objects.size).toBe(1);
   });
 });
