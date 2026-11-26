@@ -45,9 +45,6 @@ export const proposedActions = defineCollection({
     expiresAt: z.date(),
     result: toolResultPart.nullable().default(null),
     decidedAt: z.date().nullable().default(null),
-    // The member message the model was first told the outcome at (see
-    // `ActionsService.outcomes`); null until then.
-    toldOn: objectId().nullable().default(null),
   }),
   timestamps: true,
   indexes: [

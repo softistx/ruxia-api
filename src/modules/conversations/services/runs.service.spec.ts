@@ -237,8 +237,8 @@ describe("RunsService: the exchange", () => {
       "Summary of the earlier conversation:\nA SUMMARY OF IT ALL",
     );
     // The fold keeps six messages, the first of them an answer: a provider's
-    // history starts on a member's message, so that one is dropped.
-    expect(last?.messages).toHaveLength(5);
+    // history starts on a member's message, so a short note leads them.
+    expect(last?.messages).toHaveLength(7);
     expect(last?.messages[0]?.role).toBe("user");
   });
 

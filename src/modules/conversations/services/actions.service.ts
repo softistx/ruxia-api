@@ -12,6 +12,7 @@ import type { AppMongo } from "../../../config/db";
 import {
   placementsOf,
   prefaceOf,
+  RUNNING_STALE_MS,
   refusedResult,
   sdkAction,
   statusAt,
@@ -114,20 +115,18 @@ export class ActionsService {
   }
 
   // What the decided actions of `path` tell the model, by the id of the member
-  // message each heads (see `placementsOf`). The first time an outcome is told
-  // its place, the current member message, is stored (`toldOn`), so every later
-  // run repeats it there. `assistantId` is the answer being written: a member
-  // message with another answer is not fresh.
-  async outcomes(path: readonly MessageDocument[], assistantId: ObjectId) {
+  // message each heads (see `placementsOf`: from the path alone). One active
+  // run per conversation keeps these reads consistent. A claim stuck `running`
+  // is first frozen as failed (conditionally), so a late settle cannot flip an
+  // outcome the model was told.
+  async outcomes(path: readonly MessageDocument[]) {
     const carrying = path.filter(
       (doc) =>
         doc.role === "assistant" &&
         doc.parts.some((p) => p.type === "proposed-action"),
     );
-    const leaf = path.at(-1);
-    if (carrying.length === 0 || leaf === undefined) return new Map();
-    const db = this.mongo.as(this.actor).db;
-    const actions = await db.proposedActions.findMany({
+    if (carrying.length === 0) return new Map();
+    const found = await this.mongo.as(this.actor).db.proposedActions.findMany({
       filter: {
         ownerId: this.actor,
         messageId: { $in: carrying.map((doc) => doc._id) },
@@ -135,20 +134,39 @@ export class ActionsService {
       sort: { createdAt: 1, _id: 1 },
       limit: 1000,
     });
-    const answered = await db.messages.count({
-      ownerId: this.actor,
-      parentId: leaf._id,
-      _id: { $ne: assistantId },
-    });
-    const placements = placementsOf(path, actions, this.now(), answered === 0);
-    for (const { action, userId } of placements) {
-      if (action.toldOn !== null) continue;
-      await this.raw.updateOne(
-        { _id: action._id, ownerId: this.actor, toldOn: null },
-        { $set: { toldOn: new ObjectId(userId) } },
-      );
-    }
-    return prefaceOf(placements, this.now());
+    const at = this.now();
+    const actions = await Promise.all(
+      found.map((a) => this.freezeStale(a, at)),
+    );
+    return prefaceOf(placementsOf(path, actions, at), at);
+  }
+
+  // A `running` action not touched for 5 minutes becomes failed, only if it
+  // still is that: a settle that comes later matches nothing.
+  private async freezeStale(action: ProposedActionDocument, at: Date) {
+    const stale = new Date(at.getTime() - RUNNING_STALE_MS);
+    if (action.status !== "running" || action.updatedAt >= stale) return action;
+    const decidedAt = new Date(action.updatedAt.getTime() + RUNNING_STALE_MS);
+    const result = refusedResult(
+      action,
+      "TOOL_FAILED",
+    ) as ProposedActionDocument["result"];
+    const frozen = await this.raw.updateOne(
+      {
+        _id: action._id,
+        ownerId: this.actor,
+        status: "running",
+        updatedAt: { $lt: stale },
+      },
+      { $set: { status: "failed", result, decidedAt } },
+    );
+    if (frozen.matchedCount === 0) return this.find(String(action._id));
+    return {
+      ...action,
+      status: "failed" as const,
+      result,
+      decidedAt,
+    };
   }
 
   // Confirms a pending action: claimed first (one writer wins, and only before

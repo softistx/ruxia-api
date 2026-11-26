@@ -109,11 +109,20 @@ export function summaryAnchor(
   return turn >= turnsOfDoc(doc).length - 1 ? id : undefined;
 }
 
-// A provider's history starts on a member's turn: the assistant and tool turns
-// a fold leaves at the head of the context are dropped up to the first member
-// message (they are older than it; the summary stands for what came before).
-// Unchanged when no member message is there to start on.
-export function fromFirstMember(messages: readonly Message[]): Message[] {
-  const at = messages.findIndex((message) => message.role === "user");
-  return at === -1 ? [...messages] : messages.slice(at);
+// The note a context that would start on an answer is given as its first turn.
+export const SUMMARY_NOTE = "(Earlier conversation summarised above.)";
+
+// A provider's history starts on a member's turn. A leading `tool` turn is
+// dropped when the call it answers was folded (nothing is orphaned); a context
+// that then starts on an assistant turn is given a short synthetic member turn
+// before it, so no answer text is lost.
+export function startOnMember(messages: readonly Message[]): Message[] {
+  const at = messages.findIndex((message) => message.role !== "tool");
+  const kept = at === -1 ? [] : messages.slice(at);
+  const first = kept[0];
+  if (first === undefined || first.role !== "assistant") return kept;
+  return [
+    { role: "user", parts: [{ type: "text", text: SUMMARY_NOTE }] },
+    ...kept,
+  ];
 }

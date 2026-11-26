@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ObjectId } from "mongodb";
 import {
   actionDocs,
+  decisionAt,
   PROPOSAL_TTL_MS,
   placementsOf,
   prefaceOf,
@@ -92,13 +93,23 @@ describe("actionDocs", () => {
 });
 
 describe("placementsOf and prefaceOf", () => {
-  const now = new Date("2026-12-01T10:00:00Z");
-  const doc = (role: "user" | "assistant", parts: StoredPart[] = []) =>
-    ({ _id: new ObjectId(), role, parts }) as unknown as MessageDocument;
-  const assistant = doc("assistant", [proposal]);
-  const first = doc("user");
-  const leaf = doc("user");
-  const path = [first, assistant, leaf];
+  const t = (n: number) => new Date(Date.UTC(2026, 11, 1, 10, n));
+  const now = t(30);
+  const doc = (
+    role: "user" | "assistant",
+    minute: number,
+    parts: StoredPart[] = [],
+  ) =>
+    ({
+      _id: new ObjectId(),
+      role,
+      parts,
+      createdAt: t(minute),
+    }) as unknown as MessageDocument;
+  const first = doc("user", 0);
+  const assistant = doc("assistant", 1, [proposal]);
+  const second = doc("user", 10);
+  const third = doc("user", 20);
   const action = (status: string, extra = {}) =>
     ({
       messageId: assistant._id,
@@ -106,48 +117,54 @@ describe("placementsOf and prefaceOf", () => {
       tool: "remember",
       input: { text: "Hi" },
       summary: "Remember: Hi",
-      expiresAt: new Date(now.getTime() + 60_000),
-      updatedAt: now,
+      expiresAt: t(60),
+      updatedAt: t(5),
+      decidedAt: t(5),
       result: null,
-      toldOn: null,
       status,
       ...extra,
     }) as unknown as ProposedActionDocument;
-  const placed = (
-    actions: ProposedActionDocument[],
-    fresh = true,
-    on: MessageDocument[] = path,
-  ) => placementsOf(on, actions, now, fresh).map((p) => p.userId);
+  const placed = (actions: ProposedActionDocument[], on: MessageDocument[]) =>
+    placementsOf(on, actions, now).map((p) => p.userId);
+  const path = [first, assistant, second, doc("assistant", 11), third];
 
-  test("an outcome not yet told heads the current member message, the leaf", () => {
-    expect(placed([action("rejected")])).toEqual([String(leaf._id)]);
-  });
-
-  test("an action decided after the next message was answered still goes to the leaf, never back to it", () => {
-    // `first` is old; the proposing answer's next member message is `leaf`.
-    expect(placed([action("confirmed")])).not.toContain(String(first._id));
-  });
-
-  test("an outcome already told stays where it was told while that message is on the path", () => {
-    const told = action("rejected", { toldOn: first._id });
-    expect(placed([told])).toEqual([String(first._id)]);
-    // On another branch it is told at the leaf, without being moved.
-    expect(placed([told], true, [doc("user"), assistant, leaf])).toEqual([
-      String(leaf._id),
+  test("an outcome heads the first member message created after the decision", () => {
+    expect(placed([action("rejected")], path)).toEqual([String(second._id)]);
+    expect(placed([action("rejected", { decidedAt: t(15) })], path)).toEqual([
+      String(third._id),
     ]);
   });
 
-  test("a leaf that already has an answer is never changed: the outcome waits", () => {
-    expect(placed([action("rejected")], false)).toEqual([]);
-    expect(placed([action("rejected")], true, [first, assistant])).toEqual([]);
+  test("a branch from before the proposing answer sees no outcome", () => {
+    expect(placed([action("rejected")], [first])).toEqual([]);
   });
 
-  test("pending and running say nothing yet; an expired one says so", () => {
-    expect(placed([action("pending")])).toEqual([]);
-    expect(placed([action("running")])).toEqual([]);
-    expect(
-      placed([action("pending", { expiresAt: new Date(now.getTime() - 1) })]),
-    ).toEqual([String(leaf._id)]);
+  test("a path with no member message after the decision says nothing yet", () => {
+    expect(placed([action("rejected", { decidedAt: t(25) })], path)).toEqual(
+      [],
+    );
+  });
+
+  test("an edit of the told message keeps one stable place: the edit comes after the decision too", () => {
+    const edited = doc("user", 22);
+    const branch = [first, assistant, edited];
+    expect(placed([action("rejected")], branch)).toEqual([String(edited._id)]);
+    expect(placed([action("rejected")], path)).toEqual([String(second._id)]);
+  });
+
+  test("pending and running say nothing yet; a time-expired one is placed after its expiry", () => {
+    expect(placed([action("pending")], path)).toEqual([]);
+    expect(placed([action("running", { updatedAt: t(29) })], path)).toEqual([]);
+    expect(placed([action("pending", { expiresAt: t(5) })], path)).toEqual([
+      String(second._id),
+    ]);
+  });
+
+  test("a stale running claim is placed after updatedAt plus 5 minutes", () => {
+    const stale = action("running", { updatedAt: t(2) });
+    expect(decisionAt(stale)).toEqual(t(7));
+    expect(placed([stale], path)).toEqual([String(second._id)]);
+    expect(decisionAt(action("pending", { expiresAt: t(9) }))).toEqual(t(9));
   });
 
   test("prefaceOf writes the SDK's outcome text under the message it heads", () => {
@@ -159,18 +176,18 @@ describe("placementsOf and prefaceOf", () => {
       output: { id: "m1" },
     };
     const preface = prefaceOf(
-      placementsOf(path, [action("confirmed", { result })], now, true),
+      placementsOf(path, [action("confirmed", { result })], now),
       now,
     );
-    const text = JSON.stringify(preface.get(String(leaf._id)));
+    const text = JSON.stringify(preface.get(String(second._id)));
     expect(text).toContain("[application event: action outcome]");
     expect(text).toContain("It ran.");
     expect(text).toContain("m1");
     const rejected = prefaceOf(
-      placementsOf(path, [action("rejected")], now, true),
+      placementsOf(path, [action("rejected")], now),
       now,
     );
-    expect(JSON.stringify(rejected.get(String(leaf._id)))).toContain(
+    expect(JSON.stringify(rejected.get(String(second._id)))).toContain(
       "rejected",
     );
   });

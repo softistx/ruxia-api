@@ -3,7 +3,7 @@ import { compact, type StoredMessage } from "@softistx/ai-memory";
 import { type Expandable, isAttachment } from "../../attachments";
 import {
   docIdOf,
-  fromFirstMember,
+  startOnMember,
   summaryAnchor,
   toStored,
 } from "../conversations.history.utils";
@@ -42,11 +42,11 @@ export class ContextService {
   // The context of a model call over `path`: the summary stored on the deepest
   // message that has one, and the messages after it, folded again when they
   // pass the budget. The new summary is stored on the message it covers through
-  // (`summaryAnchor`: only when the fold ends on a whole message; the summary
-  // then holds for every branch below it, and a fold that ends inside an
-  // answer serves this call only). The fold sees an attachment as its name;
-  // `expand` then gives the model the real parts of the kept messages that
-  // carry one. The context starts on a member's message.
+  // (`summaryAnchor`; the fold is cut at whole messages, see `wholeFold`, so
+  // it always has one and holds for every branch below it). The fold sees an
+  // attachment as its name; `expand` then gives the model the real parts of the
+  // kept messages that carry one. The context starts on a member's message
+  // (`startOnMember`).
   async context(path: readonly MessageDocument[], options: ContextOptions) {
     const preface = options.preface ?? new Map<string, Part[]>();
     const { summary, start } = contextOf(path);
@@ -70,7 +70,7 @@ export class ContextService {
     }
     return {
       summary: result.summary ?? summary?.text ?? null,
-      messages: fromFirstMember(
+      messages: startOnMember(
         await this.withFiles(result.messages, path, options.expand, preface),
       ),
     };
@@ -89,11 +89,13 @@ export class ContextService {
     summarize: (messages: Message[]) => Promise<string>,
   ) {
     const run = (limit: number) =>
-      compact(stored, {
-        budget: limit,
-        summarize,
-        ...(summary && { summary: { text: summary.text } }),
-      });
+      wholeFold(stored, (list) =>
+        compact(list, {
+          budget: limit,
+          summarize,
+          ...(summary && { summary: { text: summary.text } }),
+        }),
+      );
     const first = await run(budget);
     const ids = new Set(first.messages.map((message) => docIdOf(message.id)));
     const reserved = attachmentTokens(
@@ -131,5 +133,42 @@ export class ContextService {
           }
         : stored.message;
     });
+  }
+}
+
+type Folded = Awaited<ReturnType<typeof compact>>;
+
+// `fold` over `stored`, moved back so it never ends inside an answer: when the
+// cut lands on a turn that is not the answer's last, the fold is run again on
+// the list up to just before that answer, and the answer and what follows are
+// kept whole. A fold that cannot be moved (nothing before the answer, or the
+// shorter list needs no fold) is left as it was.
+export async function wholeFold(
+  stored: StoredMessage[],
+  fold: (list: StoredMessage[]) => Promise<Folded>,
+): Promise<Folded> {
+  let list = stored;
+  let result = await fold(list);
+  for (;;) {
+    const through = result.throughMessageId;
+    if (through === undefined || !through.includes("#")) return result;
+    const doc = docIdOf(through);
+    const turns = list.filter((m) => docIdOf(m.id) === doc);
+    if (through === turns.at(-1)?.id) return result;
+    const first = list.findIndex((m) => docIdOf(m.id) === doc);
+    if (first <= 0) return result;
+    const before = list.slice(0, first);
+    const again = await fold(before);
+    if (again.summary === undefined) return result;
+    const rest = stored.slice(before.length);
+    result = {
+      summary: again.summary,
+      ...(again.throughMessageId !== undefined && {
+        throughMessageId: again.throughMessageId,
+      }),
+      messages: [...again.messages, ...rest],
+      tokens: again.tokens + estimateTokens(rest.map((m) => m.message)),
+    };
+    list = before;
   }
 }

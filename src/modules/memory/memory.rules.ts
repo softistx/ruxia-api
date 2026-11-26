@@ -13,13 +13,16 @@ export const MEMORY_TOOLS = ["remember", "forget"] as const;
 
 // Whether the parts of a conversation already hold output of a tool that is not
 // the memory's (a `tool-result` of another tool, or a provider's own
-// `server-tool` block): what a run would remember may come from untrusted text.
+// `server-tool` block), or an uploaded document (a pdf or a text file; an image
+// is not read as instructions): what a run would remember may come from untrusted text.
 export const taintedBy = (
-  parts: readonly { type: string; name?: string }[],
+  parts: readonly { type: string; name?: string; kind?: string }[],
 ): boolean =>
   parts.some(
     (part) =>
       part.type === "server-tool" ||
+      (part.type === "attachment" &&
+        (part.kind === "pdf" || part.kind === "text")) ||
       (part.type === "tool-result" &&
         !(MEMORY_TOOLS as readonly string[]).includes(part.name ?? "")),
   );

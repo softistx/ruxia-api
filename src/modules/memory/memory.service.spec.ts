@@ -230,7 +230,7 @@ describe("MemoryService", () => {
     ada: Member,
     personaId: string,
     turns: { name: string; input: unknown }[][],
-    history: { type: string; name?: string }[] = [],
+    history: { type: string; name?: string; kind?: string }[] = [],
   ) {
     const lookup = defineTool({
       name: "lookup",
@@ -304,5 +304,23 @@ describe("MemoryService", () => {
     expect(taintedBy([{ type: "tool-result", name: "forget" }])).toBe(false);
     expect(taintedBy([{ type: "tool-result", name: "web_search" }])).toBe(true);
     expect(taintedBy([{ type: "server-tool" }])).toBe(true);
+    expect(taintedBy([{ type: "attachment", kind: "pdf" }])).toBe(true);
+    expect(taintedBy([{ type: "attachment", kind: "text" }])).toBe(true);
+    expect(taintedBy([{ type: "attachment", kind: "image" }])).toBe(false);
+  });
+
+  test("an uploaded document earlier in the conversation taints the next run; an image does not", async () => {
+    const ada = await memberOf(kit);
+    await ada.members.updateSettings({ rememberWithoutAsking: true });
+    const id = await persona(ada);
+    const call = [[{ name: "remember", input: { text: "Likes tea" } }]];
+    const pdf = await runWith(ada, id, call, [
+      { type: "attachment", kind: "pdf" },
+    ]);
+    expect(proposed(pdf)).toHaveLength(1);
+    const image = await runWith(ada, id, call, [
+      { type: "attachment", kind: "image" },
+    ]);
+    expect(proposed(image)).toEqual([]);
   });
 });

@@ -138,7 +138,7 @@ export class MemoryService {
   // output of a tool that is not the memory's.
   async kit(
     persona: Pick<PersonaDocument, "_id" | "tools">,
-    history: readonly { type: string; name?: string }[] = [],
+    history: readonly { type: string; name?: string; kind?: string }[] = [],
   ): Promise<MemoryKit> {
     if (!persona.tools.memory) return { facts: null, tools: [], observer: {} };
     const items = await this.itemsOf(persona._id);

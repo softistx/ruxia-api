@@ -80,7 +80,6 @@ export const actionDocs = (
     expiresAt: new Date(part.expiresAt),
     result: null,
     decidedAt: null,
-    toldOn: null,
     createdAt: at,
     updatedAt: at,
   }));
@@ -111,13 +110,25 @@ export const refusedResult = (
   error: { code, message: code },
 });
 
+// When an action was decided, for placing its outcome: its `decidedAt`; the
+// expiry for one that ran out of time; `updatedAt` plus the stale delay for a
+// claim stuck `running`.
+export const decisionAt = (action: ProposedActionDocument): Date => {
+  if (action.status === "pending" || action.status === "expired") {
+    return action.expiresAt;
+  }
+  if (action.status === "running") {
+    return new Date(action.updatedAt.getTime() + RUNNING_STALE_MS);
+  }
+  return action.decidedAt ?? action.updatedAt;
+};
+
 // Where the model is told the outcome of a decided action: at the head of the
-// member message it was first told at (`toldOn`, when that message is on the
-// path), else at the head of the current member message, the leaf, when no
-// answer has been written to it yet (`fresh`). A message that already has an
-// answer is never changed afterwards, so the prompt prefix stays stable; an
-// outcome that finds no place waits for the next send. Pending and running
-// actions say nothing yet.
+// first member message on the path created after the decision. It follows from
+// the path alone, so every later run on that path repeats it in the same place
+// and an answered message is never changed; a path with no such message says
+// nothing yet (the next send's message is the one). Pending and running
+// actions say nothing.
 export interface Placement {
   action: ProposedActionDocument;
   userId: string;
@@ -127,20 +138,15 @@ export function placementsOf(
   path: readonly MessageDocument[],
   actions: readonly ProposedActionDocument[],
   now: Date,
-  fresh: boolean,
 ): Placement[] {
-  const onPath = new Set(path.map((doc) => String(doc._id)));
-  const leaf = path.at(-1);
   return actions.flatMap((action): Placement[] => {
     const status = statusAt(action, now);
     if (status === "pending" || status === "running") return [];
-    const told = action.toldOn === null ? undefined : String(action.toldOn);
-    if (told !== undefined && onPath.has(told)) {
-      return [{ action, userId: told }];
-    }
-    return leaf?.role === "user" && fresh
-      ? [{ action, userId: String(leaf._id) }]
-      : [];
+    const at = decisionAt(action).getTime();
+    const user = path.find(
+      (doc) => doc.role === "user" && doc.createdAt.getTime() > at,
+    );
+    return user === undefined ? [] : [{ action, userId: String(user._id) }];
   });
 }
 

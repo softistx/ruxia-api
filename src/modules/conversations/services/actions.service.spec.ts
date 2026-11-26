@@ -765,3 +765,36 @@ describe("where an outcome reaches the model", () => {
     expect(userTexts(requests[3]).join()).toContain("action outcome");
   });
 });
+
+describe("the outcome's place and a stale claim", () => {
+  test("a stale running action is frozen failed when read for the model: a late settle stays failed", async () => {
+    const ada = await memberCalling([
+      { name: "remember", input: { text: "a" } },
+    ]);
+    const { id, personaId } = await exchange(ada);
+    const action = await firstPending(ada, id);
+    await appMongo.db.proposedActions.raw.updateOne(
+      { _id: action._id },
+      {
+        $set: {
+          status: "running",
+          updatedAt: new Date(Date.now() - 6 * 60_000),
+        },
+      },
+    );
+    const path = await ada.messages.path(
+      await ada.conversations.find(id),
+      (await ada.conversations.find(id)).activeLeafId as ObjectId,
+    );
+    await ada.actions.outcomes(path);
+    expect((await ada.actions.find(String(action._id))).status).toBe("failed");
+    // The slow process now tries to settle `confirmed`: nothing matches.
+    const late = await appMongo.db.proposedActions.raw.updateOne(
+      { _id: action._id, status: "running" },
+      { $set: { status: "confirmed" } },
+    );
+    expect(late.matchedCount).toBe(0);
+    expect((await ada.actions.find(String(action._id))).status).toBe("failed");
+    expect(await ada.memory.list(personaId)).toEqual([]);
+  });
+});

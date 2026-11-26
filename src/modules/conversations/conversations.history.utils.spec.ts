@@ -3,7 +3,8 @@ import type { Message } from "@softistx/ai-core";
 import { ObjectId } from "mongodb";
 import {
   docIdOf,
-  fromFirstMember,
+  SUMMARY_NOTE,
+  startOnMember,
   summaryAnchor,
   toModelMessages,
   toStored,
@@ -269,18 +270,40 @@ describe("summaryAnchor", () => {
   });
 });
 
-describe("fromFirstMember", () => {
-  const m = (role: Message["role"]): Message => ({ role, parts: [] });
-
-  test("drops the assistant and tool turns before the first member message", () => {
-    expect(
-      fromFirstMember([m("assistant"), m("tool"), m("user"), m("assistant")]),
-    ).toEqual([m("user"), m("assistant")]);
+describe("startOnMember", () => {
+  const m = (role: Message["role"], t: string = role): Message => ({
+    role,
+    parts: [{ type: "text", text: t }],
   });
 
-  test("leaves a context that already starts on a member, or has none, as it is", () => {
-    expect(fromFirstMember([m("user"), m("assistant")])).toHaveLength(2);
-    expect(fromFirstMember([m("assistant")])).toHaveLength(1);
-    expect(fromFirstMember([])).toEqual([]);
+  test("a context that starts on an assistant turn is given a member turn first, nothing is dropped", () => {
+    const out = startOnMember([
+      m("assistant", "kept answer"),
+      m("user"),
+      m("assistant"),
+    ]);
+    expect(out.map((x) => x.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(JSON.stringify(out[0])).toContain(SUMMARY_NOTE);
+    expect(JSON.stringify(out[1])).toContain("kept answer");
+  });
+
+  test("a leading tool turn (its call was folded) is dropped, then the note is added if an assistant follows", () => {
+    expect(
+      startOnMember([m("tool"), m("tool"), m("user")]).map((x) => x.role),
+    ).toEqual(["user"]);
+    expect(
+      startOnMember([m("tool"), m("assistant")]).map((x) => x.role),
+    ).toEqual(["user", "assistant"]);
+  });
+
+  test("a context that starts on a member, or is empty, is as it is", () => {
+    expect(startOnMember([m("user"), m("assistant")])).toHaveLength(2);
+    expect(startOnMember([])).toEqual([]);
+    expect(startOnMember([m("tool")])).toEqual([]);
   });
 });

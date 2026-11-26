@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ObjectId } from "mongodb";
-import { contextOf } from "../conversations.utils";
+import { SUMMARY_NOTE } from "../conversations.history.utils";
 import type { MessageDocument, StoredPart } from "../models";
 import { ContextService, type StoredSummary } from "./context.service";
 
@@ -68,7 +68,7 @@ const setup = () => {
 };
 
 describe("ContextService", () => {
-  test("without a fold the context is the path after the summary, starting on a member message", async () => {
+  test("without a fold the context is the path after the summary; an answer first is given a member note, nothing lost", async () => {
     const { service, stored, options } = setup();
     const first = doc("user", [text("a")], {
       contextSummary: summaryOf("old"),
@@ -81,53 +81,99 @@ describe("ContextService", () => {
     });
     expect(stored).toEqual([]);
     expect(context.summary).toBe("old");
-    // The answer's turns come before the member's message: dropped, not sent.
-    expect(context.messages.map((m) => m.role)).toEqual(["user"]);
+    expect(context.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+    ]);
+    expect(JSON.stringify(context.messages[0])).toContain(SUMMARY_NOTE);
+    expect(JSON.stringify(context.messages)).toContain("done");
   });
 
-  test("a fold that ends on a whole message is stored on it", async () => {
+  test("a regenerate under a summary anchored on a member message still shows the new answer", async () => {
+    const { service, options } = setup();
+    const anchored = doc("user", [text("a")], {
+      contextSummary: summaryOf("old"),
+    });
+    const regenerated = doc("assistant", [text("the new answer")]);
+    const context = await service.context([anchored, regenerated], {
+      ...options,
+      window: 1_000_000,
+    });
+    expect(JSON.stringify(context.messages)).toContain("the new answer");
+  });
+
+  // Eight plain messages, then a tool-heavy answer, then the member's message.
+  const heavy = () => {
+    const plain = Array.from({ length: 8 }, (_, i) =>
+      doc(i % 2 === 0 ? "user" : "assistant", [
+        text(`m${i} ${"w ".repeat(300)}`),
+      ]),
+    );
+    return [...plain, longAnswer(4), doc("user", [text("b")])];
+  };
+
+  test("a fold that would end inside an answer is moved back: whole answer kept, summary stored on a message", async () => {
     const { service, stored, options } = setup();
-    const path = [
-      doc("user", [text("a")]),
-      doc("assistant", [text("b")]),
-      ...Array.from({ length: 8 }, (_, i) =>
-        doc(i % 2 === 0 ? "user" : "assistant", [text(`m${i}`)]),
-      ),
-    ];
+    const path = heavy();
     const context = await service.context(path, options);
     expect(context.summary).toBe("S");
     expect(stored).toHaveLength(1);
-    const [anchor] = stored[0] ?? [];
-    expect(path.map((d) => String(d._id))).toContain(anchor as string);
+    const anchor = stored[0]?.[0];
+    expect(path.slice(0, 8).map((d) => String(d._id))).toContain(
+      anchor as string,
+    );
+    // The answer's nine turns are all there, in order.
+    const roles = context.messages.map((m) => m.role).join();
+    expect(roles).toContain(
+      "assistant,tool,assistant,tool,assistant,tool,assistant,tool,assistant",
+    );
   });
 
-  test("a fold that ends inside an answer serves this call only: nothing is stored", async () => {
+  test("two consecutive runs over a long tool-heavy answer summarise once, with the same system text", async () => {
+    let summarised = 0;
+    const store = new Map<string, StoredSummary>();
+    const service = new ContextService(
+      async (id, summary) => {
+        store.set(id, summary);
+      },
+      () => new Date(0),
+    );
+    const path = heavy();
+    const options = {
+      window: 6_800,
+      systemTokens: 0,
+      summarize: async () => {
+        summarised += 1;
+        return "S";
+      },
+      expand: async () => [],
+    };
+    const one = await service.context(path, options);
+    for (const d of path) {
+      const found = store.get(String(d._id));
+      if (found) d.contextSummary = found;
+    }
+    const two = await service.context(path, options);
+    expect(summarised).toBe(1);
+    expect(two.summary).toBe(one.summary);
+    expect(JSON.stringify(two.messages)).toEqual(JSON.stringify(one.messages));
+  });
+
+  test("a fold that cannot be moved (the answer is first) serves this call only and loses nothing", async () => {
     const { service, stored, options } = setup();
     const first = doc("user", [text("a")], {
       contextSummary: summaryOf("old"),
     });
-    const answer = longAnswer(4);
-    const last = doc("user", [text("b")]);
-    const context = await service.context([first, answer, last], options);
+    const context = await service.context(
+      [first, longAnswer(4), doc("user", [text("b")])],
+      options,
+    );
     expect(context.summary).toBe("S");
     expect(stored).toEqual([]);
-    // What is kept starts on the member's message, not on a leftover turn.
-    expect(context.messages.map((m) => m.role)).toEqual(["user"]);
-  });
-
-  test("a sibling after that fold does not see the summary (a regenerate of the last member message)", async () => {
-    const { service, stored, options } = setup();
-    const first = doc("user", [text("a")], {
-      contextSummary: summaryOf("old"),
-    });
-    const answer = longAnswer(4);
-    const last = doc("user", [text("b")]);
-    await service.context([first, answer, last], options);
-    // The regenerate's branch shares first and answer; nothing was stored on
-    // any of them, so it reads the summary that was there before.
-    expect(stored).toEqual([]);
-    expect(contextOf([first, answer, last]).summary?.text).toBe("old");
-    expect(contextOf([first, answer]).summary?.text).toBe("old");
+    expect(JSON.stringify(context.messages)).toContain("done");
   });
 
   test("the preface heads the member's message it names", async () => {

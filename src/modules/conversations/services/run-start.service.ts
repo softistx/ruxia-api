@@ -200,7 +200,7 @@ export class RunStartService {
       ),
       summarize: summarizeWith(adapter),
       expand: (lists) => attachments.expand(lists, readerOf(model)),
-      preface: await this.deps.actions.outcomes(path, assistant._id),
+      preface: await this.deps.actions.outcomes(path),
     });
     const run = runAgent({
       model: adapter,
