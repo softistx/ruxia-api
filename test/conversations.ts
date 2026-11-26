@@ -24,6 +24,7 @@ import {
   ConversationsService,
   MessagesService,
   type ModelAdapters,
+  RunMessagesService,
   RunsService,
   TitlesService,
 } from "../src/modules/conversations";
@@ -72,6 +73,7 @@ export async function memberOf(
     now,
   );
   const messages = new MessagesService(appMongo, viewer, now);
+  const runMessages = new RunMessagesService(appMongo, viewer, now);
   const adapters = options.adapters ?? kit.adapters;
   const warn = options.warn ?? (() => {});
   const titles = new TitlesService(
@@ -83,30 +85,32 @@ export async function memberOf(
     now,
   );
   const runtime = options.runtime ?? kit.runtime;
+  const deps = {
+    conversations,
+    messages,
+    runMessages,
+    titles,
+    models,
+    personas,
+    adapters,
+    runtime,
+    observers: options.observers ?? [],
+    background: kit.auth.background,
+    sends: options.sends ?? unthrottled.sends,
+    warn,
+    now,
+  };
   return {
     id: account.userId,
     token: account.token,
     personas,
     conversations,
     messages,
+    runMessages,
     titles,
     runtime,
-    runs: new RunsService(
-      {
-        conversations,
-        messages,
-        titles,
-        models,
-        personas,
-        adapters,
-        runtime,
-        observers: options.observers ?? [],
-        background: kit.auth.background,
-        sends: options.sends ?? unthrottled.sends,
-        warn,
-        now,
-      },
-      viewer,
-    ),
+    viewer,
+    deps,
+    runs: new RunsService(deps, viewer),
   };
 }

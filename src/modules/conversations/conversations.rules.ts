@@ -6,6 +6,7 @@ import type {
 } from "@softistx/ai-core";
 import type { FieldIssue } from "../../shared/errors";
 import type { ModelDocument } from "../models";
+import { INTERRUPTED, TIMEOUT } from "./conversations.run-codes";
 import { costFor, partialParts, partsOf, usageOf } from "./conversations.utils";
 import type {
   MessageDocument,
@@ -13,7 +14,7 @@ import type {
   MessageUsage,
   StoredPart,
 } from "./models";
-import type { Finish } from "./services/messages.service";
+import type { Finish } from "./services/run-messages.service";
 
 // How a run's end reason is kept on the assistant message: an answer that
 // reached an end (even a refusal or a cut-off one) is DONE, a stopped one
@@ -87,16 +88,18 @@ export const systemOf = (input: {
 // How a run's end is kept on its assistant message: its status by
 // `statusOf`, the whole answer for a finished one and what was written for a
 // stopped or failed one. A thrown run has no result (FAILED, `MODEL_ERROR`);
-// a run the server aborted on its way down is FAILED `INTERRUPTED`, not
-// STOPPED.
+// an `aborted` end the shutdown caused is FAILED `INTERRUPTED` and one the
+// ceiling caused FAILED `TIMEOUT`, never STOPPED; a member's stop stays STOPPED.
 export function finishOf(input: {
   result: AgentResult | undefined;
   events: readonly AgentEvent[];
   model: Pick<ModelDocument, "provider" | "providerModel" | "prices">;
-  interrupted: boolean;
+  // Why the run was first aborted: the shutdown's or the ceiling's code; none
+  // for a member's stop.
+  abortReason: unknown;
   warn: (message: string) => void;
 }): Finish {
-  const { result, events, model, interrupted, warn } = input;
+  const { result, events, model, abortReason, warn } = input;
   if (result === undefined) {
     return failed("MODEL_ERROR", partialParts(events), null, null);
   }
@@ -113,11 +116,14 @@ export function finishOf(input: {
       errorCode: null,
     };
   }
-  if (status === "stopped" && !interrupted) {
+  const forced =
+    status === "stopped" &&
+    (abortReason === INTERRUPTED || abortReason === TIMEOUT);
+  if (status === "stopped" && !forced) {
     return { ...failed(null, partialParts(events), usage, cost), status };
   }
-  const code = interrupted
-    ? "INTERRUPTED"
+  const code = forced
+    ? String(abortReason)
     : (result.error?.code ?? "MODEL_ERROR");
   return failed(code, partialParts(events), usage, cost);
 }

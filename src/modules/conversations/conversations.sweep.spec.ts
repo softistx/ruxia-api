@@ -27,7 +27,7 @@ describe("sweepRuns", () => {
       exchanges.push({
         member,
         id: String(started._id),
-        made: await member.messages.insertExchange({
+        made: await member.runMessages.insertExchange({
           conversation: started,
           parentId: null,
           text: "Hello",
@@ -37,7 +37,7 @@ describe("sweepRuns", () => {
     }
     // One already finished is left alone.
     const [first, second] = exchanges;
-    await first?.member.messages.finalise(first.made.assistant, {
+    await first?.member.runMessages.finalise(first.made.assistant, {
       status: "done",
       parts: [{ type: "text", text: "Done" }],
       usage: null,
@@ -47,13 +47,13 @@ describe("sweepRuns", () => {
     });
     const ended = await sweepRuns(appMongo, () => new Date());
     expect(ended).toBe(1);
-    const swept = await second?.member.messages.ofRun(
+    const swept = await second?.member.runMessages.ofRun(
       String(second.made.assistant._id),
     );
     expect(swept).toMatchObject({ status: "failed", errorCode: "INTERRUPTED" });
     const conversation = await second?.member.conversations.find(second.id);
     expect(conversation?.activeRunId).toBeNull();
-    const kept = await first?.member.messages.ofRun(
+    const kept = await first?.member.runMessages.ofRun(
       String(first.made.assistant._id),
     );
     expect(kept).toMatchObject({ status: "done", errorCode: null });

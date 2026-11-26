@@ -46,7 +46,7 @@ export function authApp(
     statuses,
     media = memoryBucket().bucket,
     adapters = fakeAdapters(),
-    runtime = conversationsRuntime(),
+    runtime = conversationsRuntime({ maxRunMs: 60_000 }),
     observers = [],
     heartbeatMs,
     now,

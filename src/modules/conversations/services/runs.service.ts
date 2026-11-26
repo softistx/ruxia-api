@@ -29,19 +29,16 @@ import { isPersonaMissing, joinedText } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
 import type { ConversationsService } from "./conversations.service";
 import type { MessagesService } from "./messages.service";
+import type { RunMessagesService } from "./run-messages.service";
 import type { TitlesService } from "./titles.service";
 
 // What the runs need, every one passed by the registry (never defaulted).
 export interface RunsDeps {
   conversations: Pick<ConversationsService, "find">;
-  messages: Pick<
-    MessagesService,
-    | "requireParent"
-    | "insertExchange"
-    | "path"
-    | "context"
-    | "finalise"
-    | "ofRun"
+  messages: Pick<MessagesService, "requireParent" | "path" | "context">;
+  runMessages: Pick<
+    RunMessagesService,
+    "insertExchange" | "finalise" | "ofRun" | "release"
   >;
   titles: Pick<TitlesService, "name">;
   models: ConversationModels;
@@ -83,10 +80,10 @@ export class RunsService {
   // Writes the member's message and the empty reply, and starts the run that
   // fills it. The run goes on whether or not the client stays.
   async send(input: SendMessageInput) {
-    const { conversations, messages, models } = this.deps;
+    const { conversations, messages, runMessages, models } = this.deps;
     await limitedSend(this.deps.sends(this.actor.id));
     const conversation = await conversations.find(input.conversationId);
-    if (conversation.activeRunId !== null) throw runInProgress();
+    await this.requireIdle(conversation);
     const leaf = conversation.activeLeafId;
     const parent = await messages.requireParent(
       conversation,
@@ -94,7 +91,7 @@ export class RunsService {
     );
     const model = await models.requireAvailable(conversation.modelId);
     const persona = await this.persona(conversation);
-    const { user, assistant } = await messages.insertExchange({
+    const { user, assistant } = await runMessages.insertExchange({
       conversation,
       parentId: parent?._id ?? null,
       text: input.text,
@@ -107,18 +104,21 @@ export class RunsService {
       model,
       first: parent === null && conversation.title === null,
     };
+    const runId = String(assistant._id);
+    this.deps.runtime.claim(runId);
     try {
       await this.launch(exchange, persona.personality);
     } catch (error) {
       // Nothing is running: the reply ends FAILED rather than STREAMING for
       // ever, with the conversation released.
-      await this.end(exchange, undefined, [], error);
+      await this.end(exchange, undefined, [], undefined, error);
+    } finally {
+      this.deps.runtime.unclaim(runId);
     }
-    const runId = String(assistant._id);
     return {
       runId,
       userMessage: user,
-      reply: (await messages.ofRun(runId)) ?? assistant,
+      reply: (await runMessages.ofRun(runId)) ?? assistant,
       conversation: await conversations.find(input.conversationId),
     };
   }
@@ -126,11 +126,22 @@ export class RunsService {
   // Stops the answer being written and returns its message, keeping what was
   // written (STOPPED); a run that already ended returns unchanged.
   async stop(runId: string): Promise<MessageDocument> {
-    const { messages, runtime } = this.deps;
-    const message = await messages.ofRun(runId);
+    const { runMessages, runtime } = this.deps;
+    const message = await runMessages.ofRun(runId);
     if (message === undefined) throw runNotFound();
     if (runtime.cancel(runId, this.actor.id)) await runtime.settled(runId);
-    return (await messages.ofRun(runId)) ?? message;
+    return (await runMessages.ofRun(runId)) ?? message;
+  }
+
+  // No answer is being written: an `activeRunId` that no run of this process
+  // holds (a write that failed, a crash the boot sweep did not see) is stale,
+  // and is released rather than refused for ever.
+  private async requireIdle(conversation: ConversationDocument) {
+    const { runtime, runMessages } = this.deps;
+    const held = conversation.activeRunId;
+    if (held === null) return;
+    if (runtime.running(held)) throw runInProgress();
+    await runMessages.release(held, conversation._id);
   }
 
   // The context folded to the model's window, the run over it, and the run
@@ -161,8 +172,8 @@ export class RunsService {
       observers,
       now: () => now().getTime(),
     });
-    const recorded = recorder(run, (result, events) =>
-      this.end(exchange, result, events),
+    const recorded = recorder(run, (result, events, abortReason) =>
+      this.end(exchange, result, events, abortReason),
     );
     if (
       !(await runtime.start(String(assistant._id), recorded, this.actor.id))
@@ -186,24 +197,28 @@ export class RunsService {
 
   // Writes the answer's end once: conditional on STREAMING, so a stop and the
   // end of the run cannot both win. A thrown `error` (a failed start) is a
-  // failure with its code. The first DONE exchange names the conversation.
+  // failure with its code. The first DONE exchange names the conversation. If
+  // the write fails, the message and the conversation are released by hand:
+  // a run that cannot end never leaves the conversation locked.
   private async end(
     exchange: Exchange,
     result: AgentResult | undefined,
     events: readonly AgentEvent[],
+    abortReason: unknown,
     error?: unknown,
   ) {
-    const { messages, titles, background, runtime, warn } = this.deps;
-    const finish = finishOf({
-      result,
-      events,
-      model: exchange.model,
-      interrupted: runtime.stopping,
-      warn,
-    });
-    if (error instanceof AiError) finish.errorCode = error.code;
+    const { runMessages, titles, background, warn } = this.deps;
+    const runId = String(exchange.assistant._id);
     try {
-      const ended = await messages.finalise(exchange.assistant, finish);
+      const finish = finishOf({
+        result,
+        events,
+        model: exchange.model,
+        abortReason,
+        warn,
+      });
+      if (error instanceof AiError) finish.errorCode = error.code;
+      const ended = await runMessages.finalise(exchange.assistant, finish);
       if (ended && exchange.first && finish.status === "done") {
         const reply = joinedText(finish.parts);
         background.run("title", () =>
@@ -215,8 +230,11 @@ export class RunsService {
       }
     } catch (failure) {
       warn(
-        `run ${String(exchange.assistant._id)}: the answer could not be written: ${(failure as Error).name}`,
+        `run ${runId}: the answer could not be written: ${(failure as Error).name}`,
       );
+      await runMessages
+        .release(runId, exchange.conversation._id)
+        .catch(() => warn(`run ${runId}: the conversation could not be freed`));
     }
   }
 }

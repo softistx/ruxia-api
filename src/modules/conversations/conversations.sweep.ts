@@ -1,7 +1,5 @@
 import type { AppMongo } from "../../config/db";
-
-// The code a message left STREAMING by a process that went down ends with.
-export const interruptedCode = "INTERRUPTED";
+import { INTERRUPTED } from "./conversations.run-codes";
 
 // At boot, before the server listens: every message still STREAMING belongs
 // to a run that died with the previous process (there is one API process and
@@ -22,7 +20,7 @@ export async function sweepRuns(
     {
       $set: {
         status: "failed",
-        errorCode: interruptedCode,
+        errorCode: INTERRUPTED,
         updatedAt: at,
       },
       $inc: { version: 1 },

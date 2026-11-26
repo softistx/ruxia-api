@@ -59,7 +59,7 @@ describe("GET /runs/:runId/events", () => {
       .join("");
     expect(text).toBe("Hello there, Ada");
     // By `done` the message is final in the database.
-    expect((await ada.messages.ofRun(sent.runId))?.status).toBe("done");
+    expect((await ada.runMessages.ofRun(sent.runId))?.status).toBe("done");
   });
 
   test("Last-Event-ID resumes after that event", async () => {
@@ -92,7 +92,7 @@ describe("GET /runs/:runId/events", () => {
     controller.abort();
     await reader?.cancel().catch(() => {});
     await ada.runtime.settled(sent.runId);
-    expect(await ada.messages.ofRun(sent.runId)).toMatchObject({
+    expect(await ada.runMessages.ofRun(sent.runId)).toMatchObject({
       status: "done",
       parts: [{ type: "text", text: "Hello there, Ada" }],
     });

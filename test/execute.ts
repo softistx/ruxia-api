@@ -33,7 +33,7 @@ export async function executeAs<D, V extends Record<string, unknown>>(
         statuses: noStatuses,
         adapters: fakeAdapters(),
         titleModelId: "claude-haiku-5-5",
-        runtime: conversationsRuntime(),
+        runtime: conversationsRuntime({ maxRunMs: 60_000 }),
         observers: [],
         now: () => new Date(),
       }),

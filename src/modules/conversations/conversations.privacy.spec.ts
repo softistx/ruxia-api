@@ -46,7 +46,7 @@ describe("a member's conversations are private", () => {
     const started = await ada.conversations.start({
       personaId: String(sage._id),
     });
-    await ada.messages.insertExchange({
+    await ada.runMessages.insertExchange({
       conversation: started,
       parentId: null,
       text: "a secret",
@@ -138,7 +138,7 @@ describe("a member's conversations are private", () => {
         extensions: { code: "conversations.errors.run-not-found" },
       });
     }
-    expect((await ada.messages.ofRun(sent.runId))?.status).toBe("streaming");
+    expect((await ada.runMessages.ofRun(sent.runId))?.status).toBe("streaming");
     await ada.runs.stop(sent.runId);
   });
 });

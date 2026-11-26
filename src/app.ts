@@ -1,5 +1,3 @@
-import type { AgentObserver } from "@softistx/ai-core";
-import { aiTelemetry } from "@softistx/ai-telemetry";
 import { health } from "@softistx/alxia";
 import { graphql, type ServerContext } from "@softistx/alxia-graphql";
 import type { MediaBucket } from "@softistx/alxia-media";
@@ -21,11 +19,10 @@ import { graphqlPlugins } from "./http/graphql-plugins";
 import { schema } from "./http/schema";
 import type { Throttle } from "./limits/throttle";
 import {
-  type ConversationsRuntime,
-  conversationsRuntime,
-  HEARTBEAT_MS,
   type ModelAdapters,
+  type RunOptions,
   runEvents,
+  runTransport,
 } from "./modules/conversations";
 import type { StatusStore } from "./modules/models";
 import { AvatarsService, avatarRoutes } from "./modules/personas";
@@ -86,27 +83,21 @@ function graphqlRoute(
 // (`serverThrottle`, src/config/redis.ts); a spec gives its own `auth` (a
 // memory mailer, a fixed clock) and `throttle`.
 export function createApp(
-  options: BaseOptions & {
-    auth?: Auth;
-    throttle?: Throttle;
-    statuses?: StatusStore;
-    // The provider adapters conversations call: `serverModels` by default.
-    adapters?: ModelAdapters;
-    // The one clock of the services: the real now by default.
-    now?: () => Date;
-    // The cheap model that titles conversations: `TITLE_MODEL_ID` by default.
-    titleModelId?: string;
-    // Where the runs live: one per app, built here by default. A spec gives its
-    // own to wait for a run (`settled`).
-    runtime?: ConversationsRuntime;
-    // What watches every run: `aiTelemetry` without the content by default.
-    observers?: readonly AgentObserver[];
-    // How long a quiet run stream waits before a heartbeat comment (ms).
-    heartbeatMs?: number;
-    // The private bucket of the media routes: `S3_*`'s by default.
-    media?: MediaBucket;
-    catalogues?: () => boolean;
-  } = {},
+  options: BaseOptions &
+    RunOptions & {
+      auth?: Auth;
+      throttle?: Throttle;
+      statuses?: StatusStore;
+      // The provider adapters conversations call: `serverModels` by default.
+      adapters?: ModelAdapters;
+      // The one clock of the services: the real now by default.
+      now?: () => Date;
+      // The cheap model that titles conversations: `TITLE_MODEL_ID` by default.
+      titleModelId?: string;
+      // The private bucket of the media routes: `S3_*`'s by default.
+      media?: MediaBucket;
+      catalogues?: () => boolean;
+    } = {},
 ) {
   const auth = options.auth ?? serverAuth();
   const throttle = options.throttle ?? serverThrottle;
@@ -115,10 +106,7 @@ export function createApp(
   const adapters = options.adapters ?? serverModels;
   const now = options.now ?? (() => new Date());
   const titleModelId = options.titleModelId ?? env.TITLE_MODEL_ID;
-  const runtime = options.runtime ?? conversationsRuntime();
-  const observers = options.observers ?? [
-    aiTelemetry({ recordContent: false }),
-  ];
+  const { runtime, observers, heartbeatMs } = runTransport(options);
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
   const servicesOf = (
     viewer: Viewer | null,
@@ -146,7 +134,7 @@ export function createApp(
       .plugin(probes(cataloguesReady))
       // The answers being written, beside /graphql: the same viewer and client
       // header, the events of a run a client follows and resumes.
-      .plugin(runEvents(runtime, options.heartbeatMs ?? HEARTBEAT_MS))
+      .plugin(runEvents(runtime, heartbeatMs))
       // The files, beside /graphql: the viewer is resolved above, the kinds'
       // callbacks read it. Mounted before the body limit, which is /graphql's.
       .plugin(

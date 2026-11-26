@@ -23,9 +23,14 @@ export function recorder(
   finalise: (
     result: AgentResult | undefined,
     events: readonly AgentEvent[],
+    abortReason: unknown,
   ) => Promise<void>,
 ): RecordedRun {
   const events: AgentEvent[] = [];
+  // Why the run was first aborted (none for a member's stop): the first abort
+  // decides, so a stop that came before the shutdown stays a stop.
+  let aborted = false;
+  let abortReason: unknown;
   let finished: Promise<void> | undefined;
   let settle: () => void = () => {};
   const settled = new Promise<void>((resolve) => {
@@ -35,7 +40,11 @@ export function recorder(
   const finish = (thrown: boolean) => {
     finished ??= (async () => {
       try {
-        await finalise(thrown ? undefined : await inner.result, events);
+        await finalise(
+          thrown ? undefined : await inner.result,
+          events,
+          abortReason,
+        );
       } finally {
         settle();
       }
@@ -63,7 +72,13 @@ export function recorder(
     [Symbol.asyncIterator]: () => iterator,
     result: inner.result,
     settled,
-    abort: (reason) => inner.abort(reason),
+    abort: (reason) => {
+      if (!aborted) {
+        aborted = true;
+        abortReason = reason;
+      }
+      inner.abort(reason);
+    },
     abandon: () => {
       inner.abort();
       return finish(true);

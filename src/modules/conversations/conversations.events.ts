@@ -1,4 +1,4 @@
-import { agentEventStream } from "@softistx/ai-alxia";
+import { agentEventStream, RunNotFoundError } from "@softistx/ai-alxia";
 import { responds, unchecked } from "@softistx/alxia";
 import type { Base } from "../../http/context";
 import { clientHeader } from "../../http/csrf";
@@ -63,15 +63,39 @@ export function runEvents(runtime: ConversationsRuntime, heartbeatMs: number) {
             ],
           });
         }
-        return reply(
-          200,
-          runtime.stream(params.runId, {
-            lastEventId: request.headers.get("last-event-id"),
-            ownerId: viewer.id,
-            signal: request.signal,
-            heartbeatMs,
-          }),
-        );
+        const stream = runtime.stream(params.runId, {
+          lastEventId: request.headers.get("last-event-id"),
+          ownerId: viewer.id,
+          signal: request.signal,
+          heartbeatMs,
+        });
+        // The first item is read before the 200 is committed: a run whose
+        // retention ran out between `has` and here is a 404, not a stream that
+        // ends at once. (It waits at most one heartbeat.)
+        let first: Awaited<ReturnType<typeof stream.next>>;
+        try {
+          first = await stream.next();
+        } catch (error) {
+          if (!(error instanceof RunNotFoundError)) throw error;
+          return reply(404, {
+            errors: [
+              fail("conversations.errors.run-not-found", {
+                status: 404,
+              }).toJSON(),
+            ],
+          });
+        }
+        return reply(200, resumed(first, stream));
       },
     );
+}
+
+// The stream with the item already read put back in front.
+async function* resumed<T>(
+  first: IteratorResult<T, void>,
+  rest: AsyncGenerator<T, void, undefined>,
+) {
+  if (first.done) return;
+  yield first.value;
+  yield* rest;
 }

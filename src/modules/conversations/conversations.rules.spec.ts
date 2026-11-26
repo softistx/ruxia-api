@@ -134,8 +134,8 @@ describe("finishOf", () => {
     steps: 1,
     ...extra,
   });
-  const finish = (r: AgentResult | undefined, interrupted = false) =>
-    finishOf({ result: r, events, model, interrupted, warn: () => {} });
+  const finish = (r: AgentResult | undefined, abortReason?: string) =>
+    finishOf({ result: r, events, model, abortReason, warn: () => {} });
 
   test("an ended run is DONE with the whole answer, its usage and reason", () => {
     expect(finish(result({ reason: "max-tokens" }))).toMatchObject({
@@ -180,10 +180,33 @@ describe("finishOf", () => {
   });
 
   test("a run the server aborted is FAILED INTERRUPTED, not STOPPED", () => {
-    expect(finish(result({ reason: "aborted" }), true)).toMatchObject({
+    expect(finish(result({ reason: "aborted" }), "INTERRUPTED")).toMatchObject({
       status: "failed",
       errorCode: "INTERRUPTED",
       parts: [{ type: "text", text: "Half" }],
     });
+  });
+
+  test("the ceiling's abort is FAILED TIMEOUT, and a stop made first stays STOPPED", () => {
+    expect(finish(result({ reason: "aborted" }), "TIMEOUT")).toMatchObject({
+      status: "failed",
+      errorCode: "TIMEOUT",
+    });
+    // The recorder keeps the first abort's reason: a member's stop has none,
+    // so a shutdown that follows it changes nothing.
+    expect(finish(result({ reason: "aborted" }), undefined)).toMatchObject({
+      status: "stopped",
+      errorCode: null,
+    });
+    // A model error keeps its own code whatever aborted.
+    expect(
+      finish(
+        result({
+          reason: "error",
+          error: { code: "MODEL_ERROR", message: "x" },
+        }),
+        "INTERRUPTED",
+      ),
+    ).toMatchObject({ status: "failed", errorCode: "MODEL_ERROR" });
   });
 });

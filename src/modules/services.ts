@@ -13,11 +13,8 @@ import {
 } from "./accounts";
 import {
   type ConversationsRuntime,
-  ConversationsService,
-  MessagesService,
+  conversationsServices,
   type ModelAdapters,
-  RunsService,
-  TitlesService,
 } from "./conversations";
 import { InvitationsService } from "./invitations";
 import { MembersService, memberRenamer } from "./members";
@@ -63,22 +60,20 @@ export function services(deps: {
     deps.viewer,
     (id) => owners.load(id),
   );
-  const conversations = new ConversationsService(
-    appMongo,
-    modelCatalogue,
+  const chat = conversationsServices({
+    mongo: appMongo,
+    viewer: deps.viewer,
+    models: modelCatalogue,
     personas,
-    deps.viewer,
-    deps.now,
-  );
-  const messages = new MessagesService(appMongo, deps.viewer, deps.now);
-  const titles = new TitlesService(
-    appMongo,
-    modelCatalogue,
-    deps.adapters,
-    deps.titleModelId,
-    (message) => statusWarning("titles", message),
-    deps.now,
-  );
+    adapters: deps.adapters,
+    titleModelId: deps.titleModelId,
+    runtime: deps.runtime,
+    observers: deps.observers,
+    background: deps.auth.background,
+    sends: deps.throttle.sends,
+    warn: statusWarning,
+    now: deps.now,
+  });
   return {
     signIn: new SignInService(deps.auth, deps.request, limit),
     passkeys: new PasskeysService(deps.auth, deps.request, deps.viewer, limit),
@@ -100,26 +95,7 @@ export function services(deps: {
     ),
     models: modelCatalogue,
     personas,
-    conversations,
-    messages,
-    titles,
-    runs: new RunsService(
-      {
-        conversations,
-        messages,
-        titles,
-        models: modelCatalogue,
-        personas,
-        adapters: deps.adapters,
-        runtime: deps.runtime,
-        observers: deps.observers,
-        background: deps.auth.background,
-        sends: deps.throttle.sends,
-        warn: (message) => statusWarning("runs", message),
-        now: deps.now,
-      },
-      deps.viewer,
-    ),
+    ...chat,
     translations: new TranslationsService(loadedCatalogues, () =>
       i18n.language(),
     ),

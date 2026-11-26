@@ -131,13 +131,13 @@ describe("conversations over /graphql", () => {
     const started = await ada.conversations.start({
       personaId: String(sage._id),
     });
-    const made = await ada.messages.insertExchange({
+    const made = await ada.runMessages.insertExchange({
       conversation: started,
       parentId: null,
       text: "Hello",
       modelId: sonnet,
     });
-    await ada.messages.finalise(made.assistant, {
+    await ada.runMessages.finalise(made.assistant, {
       status: "done",
       parts: [
         { type: "thinking", text: "hm", signature: "secret" },
@@ -193,7 +193,7 @@ describe("conversations over /graphql", () => {
     const started = await ada.conversations.start({
       personaId: String(sage._id),
     });
-    const made = await ada.messages.insertExchange({
+    const made = await ada.runMessages.insertExchange({
       conversation: started,
       parentId: null,
       text: "Hello",
