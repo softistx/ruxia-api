@@ -1,8 +1,5 @@
 import {
-  type AgentEvent,
   type AgentObserver,
-  type AgentResult,
-  AiError,
   estimateTokens,
   runAgent,
 } from "@softistx/ai-core";
@@ -19,17 +16,17 @@ import type {
   ConversationPersonas,
 } from "../conversations.integrity";
 import { recorder } from "../conversations.recorder";
-import { finishOf, systemOf } from "../conversations.rules";
-import { FINALISE_FAILED, INTERRUPTED } from "../conversations.run-codes";
+import { systemOf } from "../conversations.rules";
 import {
   type ConversationsRuntime,
   ShutdownError,
 } from "../conversations.runtime";
-import { isPersonaMissing, joinedText } from "../conversations.utils";
+import { isPersonaMissing } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
 import type { ConversationsService } from "./conversations.service";
 import type { IdleService } from "./idle.service";
 import type { MessagesService } from "./messages.service";
+import { RunEndService, type Started } from "./run-end.service";
 import type { RunMessagesService } from "./run-messages.service";
 import type { TitlesService } from "./titles.service";
 
@@ -54,18 +51,6 @@ export interface RunStartDeps {
   now: () => Date;
 }
 
-type Model = Awaited<ReturnType<ConversationModels["requireAvailable"]>>;
-
-// What one send wrote and runs: the finalise reads it back.
-interface Exchange {
-  conversation: ConversationDocument;
-  user: MessageDocument;
-  assistant: MessageDocument;
-  model: Model;
-  // The conversation's first exchange: its end names the conversation.
-  first: boolean;
-}
-
 // What a send or a regenerate writes: the member's text under a parent, or the
 // member's message that already exists.
 export type Write =
@@ -79,7 +64,11 @@ export class RunStartService {
   constructor(
     private readonly deps: RunStartDeps,
     private readonly viewer: Viewer | null,
-  ) {}
+  ) {
+    this.ender = new RunEndService(deps);
+  }
+
+  private readonly ender: RunEndService;
 
   private get actor() {
     if (!this.viewer) throw new Error("runs: an operation needs a viewer");
@@ -99,9 +88,7 @@ export class RunStartService {
   // and the run launched.
   async exchange(
     conversation: ConversationDocument,
-    write:
-      | { parentId: ObjectId | null; text: string }
-      | { user: MessageDocument },
+    write: Write,
     modelOverride?: string,
   ) {
     const { conversations, runMessages, models } = this.deps;
@@ -144,11 +131,11 @@ export class RunStartService {
 
   // Launches the run; when that throws nothing is running, so the reply ends
   // FAILED rather than STREAMING for ever, with the conversation released.
-  private async launchOrFail(exchange: Exchange, personality: string) {
+  private async launchOrFail(exchange: Started, personality: string) {
     try {
       await this.launch(exchange, personality);
     } catch (error) {
-      await this.end(exchange, undefined, [], undefined, error);
+      await this.ender.end(exchange, undefined, [], undefined, error);
     }
   }
 
@@ -164,7 +151,7 @@ export class RunStartService {
 
   // The context folded to the model's window, the run over it, and the run
   // handed to the runtime under the viewer's id.
-  private async launch(exchange: Exchange, personality: string) {
+  private async launch(exchange: Started, personality: string) {
     const { messages, adapters, runtime, observers, now } = this.deps;
     const { conversation, user, assistant, model } = exchange;
     const adapter = adapters.adapterFor(model);
@@ -191,7 +178,7 @@ export class RunStartService {
       now: () => now().getTime(),
     });
     const recorded = recorder(run, (result, events, abortReason) =>
-      this.end(exchange, result, events, abortReason),
+      this.ender.end(exchange, result, events, abortReason),
     );
     if (
       !(await runtime.start(String(assistant._id), recorded, this.actor.id))
@@ -210,50 +197,6 @@ export class RunStartService {
     } catch (error) {
       if (isPersonaMissing(error)) throw personaUnavailable();
       throw error;
-    }
-  }
-
-  // Writes the answer's end once: conditional on STREAMING, so a stop and the
-  // end of the run cannot both win. A thrown `error` (a failed start) is a
-  // failure with its code. The first DONE exchange names the conversation. If
-  // the write fails, the message and the conversation are released by hand:
-  // a run that cannot end never leaves the conversation locked.
-  private async end(
-    exchange: Exchange,
-    result: AgentResult | undefined,
-    events: readonly AgentEvent[],
-    abortReason: unknown,
-    error?: unknown,
-  ) {
-    const { runMessages, titles, background, warn } = this.deps;
-    const runId = String(exchange.assistant._id);
-    try {
-      const finish = finishOf({
-        result,
-        events,
-        model: exchange.model,
-        abortReason,
-        warn,
-      });
-      if (error instanceof AiError) finish.errorCode = error.code;
-      if (error instanceof ShutdownError) finish.errorCode = INTERRUPTED;
-      const ended = await runMessages.finalise(exchange.assistant, finish);
-      if (ended && exchange.first && finish.status === "done") {
-        const reply = joinedText(finish.parts);
-        background.run("title", () =>
-          titles.name(exchange.conversation, {
-            user: joinedText(exchange.user.parts),
-            reply,
-          }),
-        );
-      }
-    } catch (failure) {
-      warn(
-        `run ${runId}: the answer could not be written: ${(failure as Error).name}`,
-      );
-      await runMessages
-        .release(runId, exchange.conversation._id, FINALISE_FAILED)
-        .catch(() => warn(`run ${runId}: the conversation could not be freed`));
     }
   }
 }

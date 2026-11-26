@@ -46,28 +46,29 @@ import { memoryBucket } from "./media";
 
 export const sonnet = "claude-sonnet-5-5";
 
-export async function memberOf(
-  kit: ReturnType<typeof authApp>,
-  options: {
-    role?: "admin" | "member";
-    name?: string;
-    now?: () => Date;
-    // The models the runs call (no scripted answer by default).
-    adapters?: ModelAdapters;
-    // The runs' host (the kit's by default: `kit.runtime`).
-    runtime?: ConversationsRuntime;
-    sends?: Throttle["sends"];
-    // The cheap model that titles, a catalogue id.
-    titleModelId?: string;
-    observers?: readonly AgentObserver[];
-    warn?: (message: string) => void;
-    // The bucket the exports go to (a memory one by default).
-    media?: ExportBucket;
-    exports?: Throttle["exports"];
-  } = {},
-) {
-  const account = await signedInAccount(kit, options);
-  const viewer = await sessionViewer(kit, account.token);
+type MemberOptions = {
+  role?: "admin" | "member";
+  name?: string;
+  now?: () => Date;
+  // The models the runs call (no scripted answer by default).
+  adapters?: ModelAdapters;
+  // The runs' host (the kit's by default: `kit.runtime`).
+  runtime?: ConversationsRuntime;
+  sends?: Throttle["sends"];
+  // The cheap model that titles, a catalogue id.
+  titleModelId?: string;
+  observers?: readonly AgentObserver[];
+  warn?: (message: string) => void;
+  // The bucket the exports go to (a memory one by default).
+  media?: ExportBucket;
+  exports?: Throttle["exports"];
+};
+
+type Kit = ReturnType<typeof authApp>;
+type SessionViewer = Awaited<ReturnType<typeof sessionViewer>>;
+
+// The services every other one is built on, for one viewer.
+function coreOf(kit: Kit, options: MemberOptions, viewer: SessionViewer) {
   const models = new ModelsService(appMongo, noStatuses, () => {});
   const personas = new PersonasService(
     appMongo,
@@ -89,11 +90,32 @@ export async function memberOf(
     now,
     idle,
   );
+  return {
+    models,
+    personas,
+    now,
+    messages,
+    runMessages,
+    runtime,
+    idle,
+    conversations,
+  };
+}
+
+// The services of a member, wired as the registry wires them, over `options`'s
+// ports.
+function servicesOfMember(
+  kit: Kit,
+  options: MemberOptions,
+  viewer: SessionViewer,
+) {
+  const core = coreOf(kit, options, viewer);
+  const { conversations, messages, idle, now } = core;
   const adapters = options.adapters ?? kit.adapters;
   const warn = options.warn ?? (() => {});
   const titles = new TitlesService(
     appMongo,
-    models,
+    core.models,
     adapters,
     options.titleModelId ?? "claude-haiku-5-5",
     warn,
@@ -102,12 +124,12 @@ export async function memberOf(
   const deps = {
     conversations,
     messages,
-    runMessages,
+    runMessages: core.runMessages,
     titles,
-    models,
-    personas,
+    models: core.models,
+    personas: core.personas,
     adapters,
-    runtime,
+    runtime: core.runtime,
     idle,
     observers: options.observers ?? [],
     background: kit.auth.background,
@@ -116,15 +138,12 @@ export async function memberOf(
     now,
   };
   return {
-    id: account.userId,
-    token: account.token,
-    personas,
+    personas: core.personas,
     conversations,
     messages,
-    runMessages,
+    runMessages: core.runMessages,
     titles,
-    runtime,
-    viewer,
+    runtime: core.runtime,
     deps,
     runs: new RunsService(deps, viewer),
     search: new SearchService(appMongo, conversations, viewer, SEARCH_CAP),
@@ -153,6 +172,18 @@ export async function memberOf(
       warn,
       now,
     ),
+  };
+}
+
+// A member's conversation services for specs, over a real account.
+export async function memberOf(kit: Kit, options: MemberOptions = {}) {
+  const account = await signedInAccount(kit, options);
+  const viewer = await sessionViewer(kit, account.token);
+  return {
+    id: account.userId,
+    token: account.token,
+    viewer,
+    ...servicesOfMember(kit, options, viewer),
   };
 }
 

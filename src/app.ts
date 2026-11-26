@@ -72,6 +72,24 @@ function graphqlRoute(
   });
 }
 
+// What `createApp` takes: the base's and the runs' options, and the ports a
+// spec gives its own.
+export type AppOptions = BaseOptions &
+  RunOptions & {
+    auth?: Auth;
+    throttle?: Throttle;
+    statuses?: StatusStore;
+    // The provider adapters conversations call: `serverModels` by default.
+    adapters?: ModelAdapters;
+    // The one clock of the services: the real now by default.
+    now?: () => Date;
+    // The cheap model that titles conversations: `TITLE_MODEL_ID` by default.
+    titleModelId?: string;
+    // The private bucket of the media routes: `S3_*`'s by default.
+    media?: MediaBucket;
+    catalogues?: () => boolean;
+  };
+
 // The probes (GET /health, GET /ready), then POST and GET /graphql behind the
 // base's middlewares. The IDE (Apollo Sandbox, on a browser's GET) follows
 // alxia's dev switch: on under `bun dev` (NODE_ENV=development), off
@@ -84,23 +102,7 @@ function graphqlRoute(
 // and the anonymous operations count the client's address in `throttle`
 // (`serverThrottle`, src/config/redis.ts); a spec gives its own `auth` (a
 // memory mailer, a fixed clock) and `throttle`.
-export function createApp(
-  options: BaseOptions &
-    RunOptions & {
-      auth?: Auth;
-      throttle?: Throttle;
-      statuses?: StatusStore;
-      // The provider adapters conversations call: `serverModels` by default.
-      adapters?: ModelAdapters;
-      // The one clock of the services: the real now by default.
-      now?: () => Date;
-      // The cheap model that titles conversations: `TITLE_MODEL_ID` by default.
-      titleModelId?: string;
-      // The private bucket of the media routes: `S3_*`'s by default.
-      media?: MediaBucket;
-      catalogues?: () => boolean;
-    } = {},
-) {
+export function createApp(options: AppOptions = {}) {
   const auth = options.auth ?? serverAuth();
   const throttle = options.throttle ?? serverThrottle;
   const statuses = options.statuses ?? serverStatuses;
@@ -110,25 +112,17 @@ export function createApp(
   const titleModelId = options.titleModelId ?? env.TITLE_MODEL_ID;
   const { runtime, observers, heartbeatMs } = runTransport(options);
   const cataloguesReady = options.catalogues ?? cataloguesLoaded;
-  const servicesOf = (
-    viewer: Viewer | null,
-    request: Request,
-    ip: string | undefined,
-  ) =>
-    services({
-      auth,
-      request,
-      viewer,
-      throttle,
-      clientIp: ip,
-      statuses,
-      adapters,
-      titleModelId,
-      runtime,
-      observers,
-      media,
-      now,
-    });
+  const servicesOf = servicesFactory({
+    auth,
+    throttle,
+    statuses,
+    adapters,
+    titleModelId,
+    runtime,
+    observers,
+    media,
+    now,
+  });
   return (
     createBase({
       ...options,
@@ -141,16 +135,7 @@ export function createApp(
       // The files, beside /graphql (the persona avatars and the exports of
       // conversations): the viewer is resolved above, the kinds' callbacks
       // read it. Mounted before the body limit, which is /graphql's.
-      .plugin(
-        appMedia(
-          {
-            avatars: new AvatarsService(appMongo),
-            exports: new ExportFiles(appMongo),
-            throttle,
-          },
-          media,
-        ),
-      )
+      .plugin(filesOf(throttle, media))
       // A body past 100 KiB is refused (413) before it is read, for /graphql
       // below: a query is a few kilobytes (alxia's production guide, "Cap the body").
       .bodyLimit(BODY_LIMIT)
@@ -162,6 +147,30 @@ export function createApp(
         await closeDatabases();
         await redis?.close();
       })
+  );
+}
+
+// The services of a request: what every request shares, bound to its viewer,
+// its request and its client address.
+function servicesFactory(
+  shared: Omit<
+    Parameters<typeof services>[0],
+    "request" | "viewer" | "clientIp"
+  >,
+) {
+  return (viewer: Viewer | null, request: Request, ip: string | undefined) =>
+    services({ ...shared, request, viewer, clientIp: ip });
+}
+
+// The files beside /graphql: the persona avatars and the conversation exports.
+function filesOf(throttle: Throttle, media: MediaBucket) {
+  return appMedia(
+    {
+      avatars: new AvatarsService(appMongo),
+      exports: new ExportFiles(appMongo),
+      throttle,
+    },
+    media,
   );
 }
 

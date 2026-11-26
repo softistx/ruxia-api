@@ -4,6 +4,7 @@ export * from "./exports.service";
 export * from "./idle.service";
 export * from "./messages.service";
 export * from "./reactions.service";
+export * from "./run-end.service";
 export * from "./run-messages.service";
 export * from "./run-start.service";
 export * from "./runs.service";
