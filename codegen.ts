@@ -40,6 +40,9 @@ const config: CodegenConfig = {
           Persona: "@/modules/personas/models#PersonaDocument",
           Conversation: "@/modules/conversations/models#ConversationDocument",
           Message: "@/modules/conversations/models#MessageDocument",
+          MemoryItem: "@/modules/memory/memory.model#MemoryItemDocument",
+          ProposedAction:
+            "@/modules/conversations/models#ProposedActionDocument",
           Attachment: "@/modules/attachments#AttachmentDocument",
           Invitation: "@/modules/invitations#InvitationView",
           ErrorCatalogue: "@/modules/translations#CatalogueView",

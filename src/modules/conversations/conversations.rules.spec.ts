@@ -103,21 +103,23 @@ describe("languageName and systemOf", () => {
     expect(languageName("en")).toBe("English");
   });
 
-  test("the system prompt is the persona, the language, then the summary", () => {
+  test("the system prompt is the persona, the language, the remembered facts, then the summary", () => {
     expect(
       systemOf({
         personality: " Be Sage. ",
         locale: "fr",
         summary: "Earlier.",
+        memory: "Remembered facts:\n- [a] Likes tea.",
       }),
     ).toEqual([
       { text: "Be Sage." },
       { text: "Reply in French." },
+      { text: "Remembered facts:\n- [a] Likes tea." },
       { text: "Summary of the earlier conversation:\nEarlier." },
     ]);
-    expect(systemOf({ personality: "", locale: "en", summary: null })).toEqual([
-      { text: "Reply in English." },
-    ]);
+    expect(
+      systemOf({ personality: "", locale: "en", summary: null, memory: null }),
+    ).toEqual([{ text: "Reply in English." }]);
   });
 });
 

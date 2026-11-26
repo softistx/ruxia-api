@@ -1,7 +1,10 @@
+import type { AnyTool } from "@softistx/ai-core";
 import type { AttachmentsService } from "../attachments";
 import type { BudgetsService } from "../budgets/budgets.service";
+import type { MemoryService } from "../memory";
 import type { ModelsService } from "../models";
 import type { PersonasService } from "../personas";
+import type { ConversationDocument } from "./models";
 
 // What the conversations need of the other modules, as ports the registry
 // passes (never defaulted): `ModelsService` and `PersonasService` implement
@@ -35,3 +38,13 @@ export type ConversationAttachments = Pick<
   AttachmentsService,
   "require" | "link" | "expand"
 >;
+
+// What a run takes of the memory: the facts for the system prompt and the
+// tools, when the persona enables memory. `MemoryService` implements it.
+export type ConversationMemory = Pick<MemoryService, "kit">;
+
+// The tools a proposed action's name is looked up in when it is confirmed, for
+// the conversation that proposed it. Memory's today; the MCP tools join here.
+export interface ConversationActionTools {
+  toolsFor(conversation: ConversationDocument): Promise<AnyTool[]>;
+}

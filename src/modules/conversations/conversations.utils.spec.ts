@@ -3,10 +3,10 @@ import {
   type AgentEvent,
   DOCUMENT_TOKENS,
   IMAGE_TOKENS,
-  type Message,
   type Usage,
 } from "@softistx/ai-core";
 import { ObjectId } from "mongodb";
+import { shownParts } from "./conversations.shown.utils";
 import {
   attachmentTokens,
   contextOf,
@@ -16,10 +16,7 @@ import {
   pageOfPath,
   partialParts,
   partsOf,
-  shownParts,
   textMessage,
-  toModelMessages,
-  toStored,
   usageOf,
 } from "./conversations.utils";
 import type { MessageDocument, StoredPart } from "./models";
@@ -40,6 +37,7 @@ function message(
     _id: new ObjectId(),
     conversationId: new ObjectId("66f000000000000000000001"),
     parts,
+    turns: [],
     role,
     contextSummary: null,
     createdAt: new Date(1_000),
@@ -49,7 +47,7 @@ function message(
 const text = (value: string): StoredPart => ({ type: "text", text: value });
 
 describe("parts", () => {
-  test("flat parts round-trip through the SDK's messages", () => {
+  test("a run's messages are stored as flat parts, images left out", () => {
     const parts: StoredPart[] = [
       { type: "thinking", text: "hm", signature: "sig" },
       text("hi"),
@@ -62,27 +60,11 @@ describe("parts", () => {
         output: 2,
       },
     ];
-    const run: Message[] = [
-      { role: "assistant", parts: parts.slice(0, 3) as never },
-      { role: "tool", parts: parts.slice(3) as never },
+    const run = [
+      { role: "assistant", parts: [...parts.slice(0, 3), { type: "image" }] },
+      { role: "tool", parts: parts.slice(3) },
     ];
-    expect(partsOf(run)).toEqual(parts);
-    expect(toModelMessages([message("assistant", parts)])).toEqual([
-      { role: "assistant", parts: parts as never },
-    ]);
-  });
-
-  test("an image part is not stored, an empty message is not sent", () => {
-    const image = {
-      type: "image",
-      source: { kind: "url", url: "https://x.test/a.png" },
-    } as const;
-    expect(
-      partsOf([{ role: "user", parts: [image, { type: "text", text: "a" }] }]),
-    ).toEqual([text("a")]);
-    expect(
-      toModelMessages([message("user", [text("q")]), message("assistant", [])]),
-    ).toHaveLength(1);
+    expect(partsOf(run as never)).toEqual(parts);
   });
 
   test("joinedText joins the text parts only", () => {
@@ -93,12 +75,15 @@ describe("parts", () => {
 
   test("thinking signatures and redacted blocks are never shown", () => {
     expect(
-      shownParts([
-        { type: "thinking", text: "why", signature: "secret" },
-        { type: "thinking", text: "", redacted: "blob" },
-        text("answer"),
-        { type: "tool-call", id: "c", name: "t", input: {} },
-      ]),
+      shownParts(
+        [
+          { type: "thinking", text: "why", signature: "secret" },
+          { type: "thinking", text: "", redacted: "blob" },
+          text("answer"),
+          { type: "tool-call", id: "c", name: "t", input: {} },
+        ],
+        new Map(),
+      ),
     ).toEqual([
       { __typename: "MessageThinkingPart", text: "why" },
       { __typename: "MessageTextPart", text: "answer" },
@@ -191,24 +176,6 @@ describe("the path", () => {
     expect(contextOf(path.slice(2))).toEqual({ summary: null, start: 0 });
   });
 
-  test("toStored numbers the messages from 1 in the conversation", () => {
-    const stored = toStored(path);
-    expect(stored.map((m) => m.seq)).toEqual([1, 2, 3]);
-    expect(stored[0]).toMatchObject({
-      id: String(path[0]?._id),
-      threadId: String(path[0]?.conversationId),
-    });
-  });
-
-  test("toStored leaves out a message with no parts", () => {
-    const withEmpty = [
-      path[0],
-      message("assistant", []),
-      path[2],
-    ] as MessageDocument[];
-    expect(toStored(withEmpty).map((m) => m.seq)).toEqual([1, 3]);
-  });
-
   test("pages walk the branch and refuse a foreign cursor", () => {
     const first = pageOfPath(path, 2, undefined);
     expect(first?.items).toHaveLength(2);
@@ -255,7 +222,7 @@ describe("attachments in messages", () => {
     bytes: 10,
   };
   test("a reference is shown by key, kind, name, mime and size, never a URL", () => {
-    expect(shownParts([{ type: "text", text: "Hi" }, ref])).toEqual([
+    expect(shownParts([{ type: "text", text: "Hi" }, ref], new Map())).toEqual([
       { __typename: "MessageTextPart", text: "Hi" },
       {
         __typename: "MessageAttachmentPart",
@@ -265,15 +232,6 @@ describe("attachments in messages", () => {
         mime: "application/pdf",
         bytes: 10,
       },
-    ]);
-  });
-
-  test("the model messages and the fold read a reference as its name", () => {
-    expect(toModelMessages([message("user", [ref])])[0]?.parts).toEqual([
-      { type: "text", text: "[Attachment: doc.pdf]" },
-    ]);
-    expect(toStored([message("user", [ref])])[0]?.message.parts).toEqual([
-      { type: "text", text: "[Attachment: doc.pdf]" },
     ]);
   });
 

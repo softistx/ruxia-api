@@ -5,24 +5,12 @@ import {
   FREE_PRICE,
   type Message,
   type ModelPrice,
-  type Part,
   type Usage,
 } from "@softistx/ai-core";
-import type { StoredMessage } from "@softistx/ai-memory";
 import type { GraphQLError } from "graphql";
-import { estimateAttachment, isAttachment, standIn } from "../attachments";
+import { estimateAttachment, isAttachment } from "../attachments";
 import type { ModelDocument } from "../models";
 import type { MessageDocument, MessageUsage, StoredPart } from "./models";
-
-// The stored parts are the SDK's `Part`s, flat: the cast only widens a tool
-// error's `code` (a string here, the SDK's wire code there).
-// An attachment reference is not the SDK's: it reads as its name (the summary of
-// an older part of the conversation sees no file), and `expand` gives the
-// model the real parts when a call is made.
-const asParts = (parts: readonly StoredPart[]) =>
-  parts.map((part) =>
-    isAttachment(part) ? standIn(part) : part,
-  ) as unknown as Part[];
 
 // The text parts, joined: what a message says.
 export const joinedText = (parts: readonly StoredPart[]) =>
@@ -40,13 +28,6 @@ export const attachmentTokens = (path: readonly MessageDocument[]) =>
   path
     .flatMap((message) => message.parts.filter(isAttachment))
     .reduce((sum, part) => sum + estimateAttachment(part), 0);
-
-// The path root -> leaf as the model reads it. A message with no parts (a
-// stopped answer that wrote nothing) is left out: providers refuse it.
-export const toModelMessages = (path: readonly MessageDocument[]): Message[] =>
-  path
-    .filter((message) => message.parts.length > 0)
-    .map((message) => ({ role: message.role, parts: asParts(message.parts) }));
 
 // The parts a run's messages add, flat and in order (images are not stored).
 export const partsOf = (messages: readonly Message[]): StoredPart[] =>
@@ -122,21 +103,6 @@ export function costFor(
   return cost ?? null;
 }
 
-// The path as the memory package reads a thread: 1-based position, the
-// conversation as the thread. A message with no parts is left out, as the
-// model's messages leave it out.
-export const toStored = (path: readonly MessageDocument[]): StoredMessage[] =>
-  path
-    .map((message, index) => ({ message, index }))
-    .filter(({ message }) => message.parts.length > 0)
-    .map(({ message, index }) => ({
-      id: String(message._id),
-      threadId: String(message.conversationId),
-      seq: index + 1,
-      message: { role: message.role, parts: asParts(message.parts) },
-      createdAt: message.createdAt.getTime(),
-    }));
-
 // Where the model's context starts: after the deepest message of the path
 // that carries a summary (that summary covers it and everything before).
 export function contextOf(path: readonly MessageDocument[]) {
@@ -174,52 +140,6 @@ export function pageOfPath(
     nextCursor: more && last ? cursorOf(String(last._id)) : null,
   };
 }
-
-// The parts a client may see: text and thinking, tagged for the union (the
-// thinking's signature is never exposed).
-export type ShownPart =
-  | { __typename: "MessageTextPart"; text: string }
-  | { __typename: "MessageThinkingPart"; text: string }
-  | ({ __typename: "MessageAttachmentPart" } & ShownAttachment);
-
-type ShownAttachment = {
-  key: string;
-  kind: "IMAGE" | "PDF" | "TEXT";
-  name: string;
-  mime: string;
-  bytes: number;
-};
-
-export const shownParts = (parts: readonly StoredPart[]) =>
-  parts.flatMap((part): ShownPart[] => {
-    if (part.type === "text") {
-      return [{ __typename: "MessageTextPart" as const, text: part.text }];
-    }
-    if (part.type === "thinking") {
-      return part.redacted === undefined
-        ? [{ __typename: "MessageThinkingPart" as const, text: part.text }]
-        : [];
-    }
-    if (isAttachment(part)) {
-      return [
-        {
-          __typename: "MessageAttachmentPart" as const,
-          key: part.key,
-          kind: part.kind.toUpperCase() as ShownAttachment["kind"],
-          name: part.name,
-          mime: part.mime,
-          bytes: part.bytes,
-        },
-      ];
-    }
-    return [];
-  });
-
-export const shownRole = (role: MessageDocument["role"]) =>
-  role === "user" ? ("USER" as const) : ("ASSISTANT" as const);
-
-export const shownStatus = (status: MessageDocument["status"]) =>
-  status.toUpperCase() as "STREAMING" | "DONE" | "FAILED" | "STOPPED";
 
 // Whether a refusal says the persona is not readable (not found).
 export const isPersonaMissing = (error: unknown) =>

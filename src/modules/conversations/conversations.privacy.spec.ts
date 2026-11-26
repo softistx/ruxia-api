@@ -167,6 +167,42 @@ describe("a member's conversations are private", () => {
     ]);
   });
 
+  test("no admin field reaches memory or proposed actions, and the roots that name them are the member's", () => {
+    const typed = (name: string) => {
+      const type = schema.getType(name);
+      return type && isObjectType(type) ? Object.keys(type.getFields()) : [];
+    };
+    for (const name of [
+      "MemoryItem",
+      "ProposedAction",
+      "MessageProposedActionPart",
+    ]) {
+      expect(typed(name).length).toBeGreaterThan(0);
+      for (const field of typed(name))
+        expect(field).not.toMatch(/admin|owner/i);
+    }
+    const roots = [schema.getQueryType(), schema.getMutationType()];
+    const named = roots.flatMap((root) =>
+      Object.entries(root?.getFields() ?? {})
+        .filter(
+          ([, field]) =>
+            /Memory|ProposedAction|clearMemory/.test(String(field.type)) ||
+            /emory/.test(field.name),
+        )
+        .map(([name]) => name),
+    );
+    expect(named.sort()).toEqual([
+      "addMemoryItem",
+      "clearMemory",
+      "confirmAction",
+      "deleteMemoryItem",
+      "memoryItems",
+      "pendingActions",
+      "rejectAction",
+      "updateMemoryItem",
+    ]);
+  });
+
   test("the admin's team usage is figures only: no content, title or conversation field", () => {
     const figures = ["TeamUsage", "MemberUsage", "ModelUsage", "Usage"];
     const allowed = new Set(["String", "ID", "Int", "Float", "Boolean"]);

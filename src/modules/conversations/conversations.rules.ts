@@ -6,6 +6,7 @@ import type {
 } from "@softistx/ai-core";
 import type { FieldIssue } from "../../shared/errors";
 import type { ModelDocument } from "../models";
+import { turnsOf } from "./conversations.history.utils";
 import { INTERRUPTED, TIMEOUT } from "./conversations.run-codes";
 import { costFor, partialParts, partsOf, usageOf } from "./conversations.utils";
 import type {
@@ -69,15 +70,18 @@ export const languageName = (locale: string) =>
 
 // What the model is told before the conversation: the persona's personality
 // (when it has one), the language to answer in, and what an earlier fold of
-// the conversation kept.
+// the conversation kept, and the persona's remembered facts (already framed
+// as data, see `factsOf`).
 export const systemOf = (input: {
   personality: string;
   locale: string;
   summary: string | null;
+  memory: string | null;
 }): SystemBlock[] =>
   [
     input.personality.trim(),
     `Reply in ${languageName(input.locale)}.`,
+    input.memory ?? "",
     input.summary === null
       ? ""
       : `Summary of the earlier conversation:\n${input.summary}`,
@@ -110,6 +114,7 @@ export function finishOf(input: {
     return {
       status,
       parts: partsOf(result.messages),
+      turns: turnsOf(result.messages),
       usage,
       cost,
       finishReason: result.reason,

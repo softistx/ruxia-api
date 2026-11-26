@@ -3,6 +3,7 @@ import { codes as budgets } from "../modules/budgets/budgets.errors";
 import { codes as conversations } from "../modules/conversations/conversations.errors";
 import { codes as invitations } from "../modules/invitations/invitations.errors";
 import { codes as members } from "../modules/members/members.errors";
+import { codes as memory } from "../modules/memory/memory.errors";
 import { codes as models } from "../modules/models/models.errors";
 import { codes as personas } from "../modules/personas/personas.errors";
 import { codes as operator } from "../scripts/operator.errors";
@@ -54,6 +55,7 @@ export const errorCodes = [
   ...conversations,
   ...invitations,
   ...members,
+  ...memory,
   ...models,
   ...personas,
   ...operator,

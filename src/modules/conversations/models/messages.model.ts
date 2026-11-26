@@ -35,7 +35,7 @@ const toolCallPart = z.object({
   name: z.string(),
   input: z.unknown(),
 });
-const toolResultPart = z.union([
+export const toolResultPart = z.union([
   z.object({
     type: z.literal("tool-result"),
     callId: z.string(),
@@ -76,6 +76,16 @@ export const messagePart = z.union([
 ]);
 export type StoredPart = z.infer<typeof messagePart>;
 
+// How a run's parts were grouped in the SDK's messages (assistant, then tool,
+// then assistant again...): consecutive parts, `count` of them, one SDK
+// message each. With it the provider's history is rebuilt valid, tool calls
+// and results included; a message without it (older, or a member's) is flat.
+export const messageTurn = z.object({
+  role: z.enum(["assistant", "tool"]),
+  count: z.number().int().min(1),
+});
+export type MessageTurn = z.infer<typeof messageTurn>;
+
 export const messageUsage = z.object({
   inputTokens: z.number().int().min(0),
   outputTokens: z.number().int().min(0),
@@ -102,6 +112,7 @@ export const messages = defineCollection({
     parentId: objectId().nullable().default(null),
     role: z.enum(messageRoles),
     parts: z.array(messagePart).default([]),
+    turns: z.array(messageTurn).default([]),
     modelId: z.string().max(200).nullable().default(null),
     status: z.enum(messageStatuses),
     usage: messageUsage.nullable().default(null),

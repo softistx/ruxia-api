@@ -5,9 +5,10 @@ import { memberOf } from "~/conversations";
 import { memoryBucket } from "~/media";
 import { appMongo } from "../../config/db";
 import { unthrottled } from "../../limits/throttle";
+import { memoryActionTools } from "../memory";
 import { conversationsServices } from "./conversations.registry";
 
-test("builds the nine conversations services, wired to the viewer", async () => {
+test("builds the ten conversations services, wired to the viewer", async () => {
   const kit = authApp();
   const ada = await memberOf(kit);
   const group = conversationsServices({
@@ -17,6 +18,8 @@ test("builds the nine conversations services, wired to the viewer", async () => 
     budgets: ada.budgets,
     personas: ada.deps.personas,
     attachments: ada.attachments,
+    memory: ada.memory,
+    actionTools: memoryActionTools(ada.memory, ada.deps.personas),
     adapters: adaptersByModel({}),
     titleModelId: "claude-haiku-5-5",
     runtime: kit.runtime,
@@ -29,6 +32,7 @@ test("builds the nine conversations services, wired to the viewer", async () => 
     now: () => new Date(),
   });
   expect(Object.keys(group).sort()).toEqual([
+    "actions",
     "branches",
     "conversations",
     "exports",

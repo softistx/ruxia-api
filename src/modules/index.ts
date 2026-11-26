@@ -3,12 +3,14 @@ import type { Resolvers } from "@/generated/graphql/resolvers";
 import { accounts } from "./accounts/accounts.resolver";
 import { attachments } from "./attachments/resolvers/attachments.resolver";
 import { budgets } from "./budgets/budgets.resolver";
+import { actions } from "./conversations/resolvers/actions.resolver";
 import { branches } from "./conversations/resolvers/branches.resolver";
 import { conversations } from "./conversations/resolvers/conversations.resolver";
 import { messages } from "./conversations/resolvers/messages.resolver";
 import { runs } from "./conversations/resolvers/runs.resolver";
 import { invitations } from "./invitations/invitations.resolver";
 import { members } from "./members/members.resolver";
+import { memory } from "./memory/memory.resolver";
 import { models } from "./models/models.resolver";
 import { personas } from "./personas/resolvers/personas.resolver";
 import { systemResolvers } from "./system/system.resolver";
@@ -20,12 +22,14 @@ import { translationResolvers } from "./translations/translations.resolver";
 // `verify`, with no MongoDB) loads this file.
 export const resolvers = mergeResolvers([
   accounts,
+  actions,
   attachments,
   branches,
   budgets,
   conversations,
   invitations,
   members,
+  memory,
   messages,
   models,
   personas,

@@ -2,6 +2,7 @@ import {
   type AgentObserver,
   estimateTokens,
   runAgent,
+  toolSpec,
 } from "@softistx/ai-core";
 import { summarizeWith } from "@softistx/ai-memory";
 import { ObjectId } from "mongodb";
@@ -10,11 +11,14 @@ import type { Throttle } from "../../../limits/throttle";
 import type { Background } from "../../../shared/background";
 import { unavailable } from "../../../shared/errors";
 import { type AttachmentPart, readerOf } from "../../attachments";
+import type { PersonaDocument } from "../../personas/models";
+import { PROPOSAL_TTL_MS } from "../conversations.actions.utils";
 import type { ModelAdapters } from "../conversations.adapters";
 import { limitedSend, personaUnavailable } from "../conversations.errors";
 import type {
   ConversationAttachments,
   ConversationBudgets,
+  ConversationMemory,
   ConversationModels,
   ConversationPersonas,
 } from "../conversations.integrity";
@@ -26,6 +30,7 @@ import {
 } from "../conversations.runtime";
 import { isPersonaMissing } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
+import type { ActionsService } from "./actions.service";
 import type { ConversationsService } from "./conversations.service";
 import type { IdleService } from "./idle.service";
 import type { MessagesService } from "./messages.service";
@@ -42,11 +47,13 @@ export interface RunStartDeps {
     "insertExchange" | "finalise" | "ofRun" | "release"
   >;
   titles: Pick<TitlesService, "name">;
+  actions: Pick<ActionsService, "outcomes">;
   models: ConversationModels;
   budgets: ConversationBudgets;
   personas: ConversationPersonas;
   adapters: ModelAdapters;
   attachments: Pick<ConversationAttachments, "expand">;
+  memory: ConversationMemory;
   runtime: ConversationsRuntime;
   idle: Pick<IdleService, "require">;
   observers: readonly AgentObserver[];
@@ -131,7 +138,7 @@ export class RunStartService {
           conversation.activeLeafId === null &&
           conversation.title === null,
       };
-      await this.launchOrFail(exchange, persona.personality);
+      await this.launchOrFail(exchange, persona);
       return {
         runId,
         userMessage: user,
@@ -145,9 +152,9 @@ export class RunStartService {
 
   // Launches the run; when that throws nothing is running, so the reply ends
   // FAILED rather than STREAMING for ever, with the conversation released.
-  private async launchOrFail(exchange: Started, personality: string) {
+  private async launchOrFail(exchange: Started, persona: PersonaDocument) {
     try {
-      await this.launch(exchange, personality);
+      await this.launch(exchange, persona);
     } catch (error) {
       await this.ender.end(exchange, undefined, [], undefined, error);
     }
@@ -164,33 +171,44 @@ export class RunStartService {
   }
 
   // The context folded to the model's window, the run over it, and the run
-  // handed to the runtime under the viewer's id.
-  private async launch(exchange: Started, personality: string) {
+  // handed to the runtime under the viewer's id. The persona's remembered
+  // facts and the memory tools join the run when it keeps a memory; both are
+  // counted in the room the system prompt takes.
+  private async launch(exchange: Started, persona: PersonaDocument) {
     const { messages, adapters, attachments, runtime, observers, now } =
       this.deps;
     const { conversation, user, assistant, model } = exchange;
     const adapter = adapters.adapterFor(model);
     const path = await messages.path(conversation, user._id);
-    const base = systemOf({
-      personality,
+    const { facts, tools, observer } = await this.deps.memory.kit(
+      persona,
+      path.flatMap((doc) => doc.parts),
+    );
+    const base = {
+      personality: persona.personality,
       locale: this.actor.locale,
-      summary: null,
-    });
+      memory: facts,
+    };
+    const blocks = systemOf({ ...base, summary: null });
     const context = await messages.context(path, {
       window: model.contextWindow,
-      systemTokens: estimateTokens(base.map((block) => block.text).join("\n")),
+      systemTokens: estimateTokens(
+        [
+          ...blocks.map((block) => block.text),
+          JSON.stringify(tools.map(toolSpec)),
+        ].join("\n"),
+      ),
       summarize: summarizeWith(adapter),
       expand: (lists) => attachments.expand(lists, readerOf(model)),
+      preface: await this.deps.actions.outcomes(path),
     });
     const run = runAgent({
       model: adapter,
-      system: systemOf({
-        personality,
-        locale: this.actor.locale,
-        summary: context.summary,
-      }),
+      system: systemOf({ ...base, summary: context.summary }),
       messages: context.messages,
-      observers,
+      tools,
+      proposalTtlMs: PROPOSAL_TTL_MS,
+      observers: [...observers, observer],
       now: () => now().getTime(),
     });
     const recorded = recorder(run, (result, events, abortReason) =>

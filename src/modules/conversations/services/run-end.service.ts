@@ -1,5 +1,7 @@
 import { type AgentEvent, type AgentResult, AiError } from "@softistx/ai-core";
+import { ObjectId } from "mongodb";
 import type { Background } from "../../../shared/background";
+import { proposalsIn } from "../conversations.actions.utils";
 import type {
   ConversationBudgets,
   ConversationModels,
@@ -9,7 +11,7 @@ import { FINALISE_FAILED, INTERRUPTED } from "../conversations.run-codes";
 import { ShutdownError } from "../conversations.runtime";
 import { joinedText } from "../conversations.utils";
 import type { ConversationDocument, MessageDocument } from "../models";
-import type { RunMessagesService } from "./run-messages.service";
+import type { Finish, RunMessagesService } from "./run-messages.service";
 import type { TitlesService } from "./titles.service";
 
 export type Model = Awaited<ReturnType<ConversationModels["requireAvailable"]>>;
@@ -41,9 +43,11 @@ export class RunEndService {
 
   // Writes the answer's end once: conditional on STREAMING, so a stop and the
   // end of the run cannot both win. A thrown `error` (a failed start) is a
-  // failure with its code. The first DONE exchange names the conversation. If
-  // the write fails, the message and the conversation are released by hand:
-  // a run that cannot end never leaves the conversation locked.
+  // failure with its code. The actions the model proposed take an id of the
+  // store's own and are stored with the message's end, in one transaction. The
+  // first DONE exchange names the conversation. If the write fails, the message
+  // and the conversation are released by hand: a run that cannot end never
+  // leaves the conversation locked.
   async end(
     exchange: Started,
     result: AgentResult | undefined,
@@ -51,7 +55,7 @@ export class RunEndService {
     abortReason: unknown,
     error?: unknown,
   ) {
-    const { runMessages, titles, budgets, background, warn } = this.deps;
+    const { runMessages, warn } = this.deps;
     const runId = String(exchange.assistant._id);
     try {
       const finish = finishOf({
@@ -63,25 +67,17 @@ export class RunEndService {
       });
       if (error instanceof AiError) finish.errorCode = error.code;
       if (error instanceof ShutdownError) finish.errorCode = INTERRUPTED;
-      const ended = await runMessages.finalise(exchange.assistant, finish);
-      // The cost is written: the member's 80 % alert is checked in the
-      // background, so it never slows or fails the run's end. A free reply
-      // (cost 0) or one of unknown price (null) cannot raise it.
-      if (ended && (finish.cost ?? 0) > 0) {
-        const { ownerId, createdAt } = exchange.assistant;
-        background.run("budget alert", () =>
-          budgets.checkAlert(ownerId, createdAt),
-        );
-      }
-      if (ended && exchange.first && finish.status === "done") {
-        const reply = joinedText(finish.parts);
-        background.run("title", () =>
-          titles.name(exchange.conversation, {
-            user: joinedText(exchange.user.parts),
-            reply,
-          }),
-        );
-      }
+      const { parts, proposed } = proposalsIn(
+        finish.parts,
+        () => new ObjectId(),
+      );
+      finish.parts = parts;
+      const ended = await runMessages.finalise(
+        exchange.assistant,
+        finish,
+        proposed,
+      );
+      if (ended) this.afterEnd(exchange, finish);
     } catch (failure) {
       warn(
         `run ${runId}: the answer could not be written: ${(failure as Error).name}`,
@@ -89,6 +85,29 @@ export class RunEndService {
       await runMessages
         .release(runId, exchange.conversation._id, FINALISE_FAILED)
         .catch(() => warn(`run ${runId}: the conversation could not be freed`));
+    }
+  }
+
+  // What follows a written end, in the background so it never slows or fails
+  // the run's end: the member's 80 % alert (a free reply, cost 0, or one of
+  // unknown price, null, cannot raise it) and, after the first DONE exchange,
+  // the conversation's title.
+  private afterEnd(exchange: Started, finish: Finish) {
+    const { titles, budgets, background } = this.deps;
+    if ((finish.cost ?? 0) > 0) {
+      const { ownerId, createdAt } = exchange.assistant;
+      background.run("budget alert", () =>
+        budgets.checkAlert(ownerId, createdAt),
+      );
+    }
+    if (exchange.first && finish.status === "done") {
+      const reply = joinedText(finish.parts);
+      background.run("title", () =>
+        titles.name(exchange.conversation, {
+          user: joinedText(exchange.user.parts),
+          reply,
+        }),
+      );
     }
   }
 }

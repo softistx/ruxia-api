@@ -1,0 +1,60 @@
+"Who wrote a remembered fact."
+enum MemorySource {
+  "The persona's model, through a confirmed `remember`."
+  MODEL
+  "The member."
+  USER
+}
+
+"""
+One fact a persona remembers about the signed-in member (spec 4.8). Only its
+owner reads it: another member gets `memory.errors.not-found`, and so does the
+admin.
+"""
+type MemoryItem {
+  "The item's id."
+  id: ID!
+  "The persona it belongs to."
+  personaId: ID!
+  "The fact, up to 500 characters."
+  text: String!
+  "Who wrote it."
+  source: MemorySource!
+  "When it was added."
+  createdAt: DateTime!
+  "When it last changed."
+  updatedAt: DateTime!
+}
+
+extend type Query {
+  """
+  The member's remembered facts for a persona they may read (a deleted one
+  too), newest first, at most 200. 404 `personas.errors.not-found` for a
+  persona the member cannot read.
+  """
+  memoryItems("The persona." personaId: ID!): [MemoryItem!]!
+}
+
+extend type Mutation {
+  """
+  Adds a fact the member wrote (source USER). 409 `memory.errors.full` past 200
+  items for the persona; `text` is refused when blank or past 500 characters.
+  """
+  addMemoryItem(
+    "The persona."
+    personaId: ID!
+    "The fact; at most 500 characters once trimmed."
+    text: String! @constraint(maxLength: 2000)
+  ): MemoryItem!
+  "Replaces the text of one of the member's facts. 404 `memory.errors.not-found` for any other."
+  updateMemoryItem(
+    "The item."
+    id: ID!
+    "The new text; at most 500 characters once trimmed."
+    text: String! @constraint(maxLength: 2000)
+  ): MemoryItem!
+  "Deletes one of the member's facts and answers its id."
+  deleteMemoryItem("The item." id: ID!): ID!
+  "Deletes every fact the member has for a persona and answers how many."
+  clearMemory("The persona." personaId: ID!): Int!
+}

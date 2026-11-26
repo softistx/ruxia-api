@@ -23,6 +23,7 @@ import { type Throttle, unthrottled } from "../src/limits/throttle";
 import { AttachmentsService } from "../src/modules/attachments";
 import { type AlertHook, BudgetsService, noPush } from "../src/modules/budgets";
 import {
+  ActionsService,
   BranchesService,
   type ConversationsRuntime,
   ConversationsService,
@@ -40,6 +41,7 @@ import {
   TitlesService,
 } from "../src/modules/conversations";
 import { MembersService } from "../src/modules/members";
+import { MemoryService, memoryActionTools } from "../src/modules/memory";
 import {
   ModelsService,
   noStatuses,
@@ -152,11 +154,20 @@ function servicesOfMember(
   );
   // The budgets, over the real spend, as the registry wires them: a member
   // with the default budget (20 USD) and the kit's memory mailer.
+  const members = new MembersService(appMongo, kit.auth, viewer);
+  const memory = new MemoryService(appMongo, core.personas, members, viewer);
+  const actions = new ActionsService(
+    appMongo,
+    conversations,
+    memoryActionTools(memory, core.personas),
+    viewer,
+    now,
+  );
   const budgets = new BudgetsService(
     {
       mongo: appMongo,
       spend: new SpendService(appMongo),
-      members: new MembersService(appMongo, kit.auth, viewer),
+      members,
       mail: { mailer: kit.auth.mailer, from: kit.auth.from },
       background: kit.auth.background,
       onAlert,
@@ -170,9 +181,11 @@ function servicesOfMember(
     messages,
     runMessages: core.runMessages,
     titles,
+    actions,
     models: core.models,
     personas: core.personas,
     attachments: core.attachments,
+    memory,
     adapters,
     runtime: core.runtime,
     idle,
@@ -185,6 +198,9 @@ function servicesOfMember(
   return {
     personas: core.personas,
     attachments: core.attachments,
+    members,
+    memory,
+    actions,
     budgets,
     conversations,
     messages,

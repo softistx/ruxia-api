@@ -5,12 +5,15 @@ import type { Throttle } from "../../limits/throttle";
 import type { Background } from "../../shared/background";
 import type { ModelAdapters } from "./conversations.adapters";
 import type {
+  ConversationActionTools,
   ConversationAttachments,
   ConversationBudgets,
+  ConversationMemory,
   ConversationModels,
   ConversationPersonas,
 } from "./conversations.integrity";
 import type { ConversationsRuntime } from "./conversations.runtime";
+import { ActionsService } from "./services/actions.service";
 import { BranchesService } from "./services/branches.service";
 import { ConversationsService } from "./services/conversations.service";
 import { type ExportBucket, ExportsService } from "./services/exports.service";
@@ -31,6 +34,9 @@ export type ConversationsDeps = {
   budgets: ConversationBudgets;
   personas: ConversationPersonas;
   attachments: ConversationAttachments;
+  memory: ConversationMemory;
+  // The tools a proposed action is looked up in when it is confirmed.
+  actionTools: ConversationActionTools;
   adapters: ModelAdapters;
   titleModelId: string;
   runtime: ConversationsRuntime;
@@ -50,6 +56,7 @@ type Shared = {
   messages: MessagesService;
   runMessages: RunMessagesService;
   idle: IdleService;
+  actions: ActionsService;
 };
 
 // The titles and the runs, which need the shared services and the model ports.
@@ -71,6 +78,7 @@ function runServices(deps: ConversationsDeps, shared: Shared) {
       budgets: deps.budgets,
       personas,
       attachments: deps.attachments,
+      memory: deps.memory,
       adapters: deps.adapters,
       runtime: deps.runtime,
       observers: deps.observers,
@@ -103,9 +111,17 @@ export function conversationsServices(deps: ConversationsDeps) {
     now,
     idle,
   );
-  const shared = { conversations, messages, runMessages, idle };
+  const actions = new ActionsService(
+    mongo,
+    conversations,
+    deps.actionTools,
+    viewer,
+    now,
+  );
+  const shared = { conversations, messages, runMessages, idle, actions };
   return {
     conversations,
+    actions,
     messages,
     runMessages,
     ...runServices(deps, shared),
